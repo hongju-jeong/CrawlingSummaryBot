@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class IssueListItem(BaseModel):
@@ -27,6 +27,16 @@ class ReportPreviewResponse(BaseModel):
     preview_message: str
 
 
+class IssueDetailResponse(BaseModel):
+    issue_id: int
+    title: str
+    source: str
+    category: str
+    original_url: str | None = None
+    published_at: datetime | None = None
+    raw_content: str
+
+
 class DeliveryLogItem(BaseModel):
     id: int
     title: str
@@ -43,3 +53,16 @@ class DeliveryLogListResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class LatestNewsCrawlRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class CrawlJobSummaryResponse(BaseModel):
+    source: str
+    requested_count: int
+    collected_count: int
+    saved_count: int
+    skipped_count: int
+    failed_count: int

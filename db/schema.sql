@@ -17,6 +17,7 @@ create table issues (
   id bigserial primary key,
   source_id bigint not null references sources(id),
   external_id varchar(255),
+  press_name varchar(100),
   title varchar(500) not null,
   original_url text,
   category varchar(50) not null,

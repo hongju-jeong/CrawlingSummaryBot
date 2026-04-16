@@ -18,7 +18,7 @@ FastAPI 백엔드 기준으로 현재 화면에 필요한 데이터 구조를 ER
 | 설명 | 수집된 실시간 이슈 원본 데이터 |
 | PK | `id` |
 | FK | `source_id -> sources.id` |
-| 주요 컬럼 | `external_id`, `title`, `original_url`, `category`, `region`, `published_at`, `collected_at`, `raw_content`, `status`, `unique_hash` |
+| 주요 컬럼 | `external_id`, `press_name`, `title`, `original_url`, `category`, `region`, `published_at`, `collected_at`, `raw_content`, `status`, `unique_hash` |
 | 화면 연결 | 실시간 이슈 리스트 |
 
 ## 3. `issue_keywords`

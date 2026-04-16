@@ -1,81 +1,129 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
-const issues = ref([
-  {
-    id: 1,
-    title: "미국 기준금리 동결 가능성 확대, 글로벌 증시 변동성 증가",
-    source: "Reuters API",
-    category: "금융",
-    time: "3분 전",
-    impact: 91,
-    summary:
-      "미 연준 관련 발언과 물가 지표가 혼재되며 금리 동결 전망이 우세해졌고, 기술주 중심으로 단기 변동성이 확대되고 있습니다.",
-    keywords: ["금리", "연준", "미국증시", "인플레이션"],
-    reportChannel: "Slack",
-    reportStatus: "전송 완료",
-  },
-  {
-    id: 2,
-    title: "국내 반도체 수출 회복세, 공급망 리스크는 여전",
-    source: "NewsAPI",
-    category: "산업",
-    time: "12분 전",
-    impact: 84,
-    summary:
-      "반도체 수출이 회복 흐름을 보이고 있으나 원자재 가격과 특정 국가 규제 이슈가 동시에 부각되며 공급망 불확실성은 남아 있습니다.",
-    keywords: ["반도체", "수출", "공급망", "산업통상"],
-    reportChannel: "Slack",
-    reportStatus: "전송 대기",
-  },
-  {
-    id: 3,
-    title: "유럽 AI 규제 후속안 발표 임박, 플랫폼 기업 대응 강화",
-    source: "SerpAPI",
-    category: "정책",
-    time: "25분 전",
-    impact: 76,
-    summary:
-      "유럽 규제기관의 후속 가이드라인 발표가 예고되면서 주요 플랫폼 기업들이 모델 투명성과 데이터 거버넌스 대응안을 조정하고 있습니다.",
-    keywords: ["AI 규제", "EU", "플랫폼", "정책"],
-    reportChannel: "Slack",
-    reportStatus: "생성 완료",
-  },
-]);
-
-const logs = ref([
-  {
-    id: 1,
-    title: "미국 기준금리 동결 가능성 확대",
-    channel: "Slack",
-    time: "09:41",
-    status: "성공",
-  },
-  {
-    id: 2,
-    title: "국내 반도체 수출 회복세",
-    channel: "Slack",
-    time: "09:35",
-    status: "대기",
-  },
-  {
-    id: 3,
-    title: "유럽 AI 규제 후속안 발표 임박",
-    channel: "Slack",
-    time: "09:12",
-    status: "실패",
-  },
-]);
-
-const selectedIssueId = ref(1);
+const issues = ref([]);
+const logs = ref([]);
+const selectedIssueId = ref(null);
+const selectedPreview = ref(null);
+const selectedIssueDetail = ref(null);
+const isLoadingIssues = ref(false);
+const isLoadingPreview = ref(false);
+const isCrawling = ref(false);
+const errorMessage = ref("");
 
 const selectedIssue = computed(() => {
-  return issues.value.find((issue) => issue.id === selectedIssueId.value) ?? issues.value[0];
+  return issues.value.find((issue) => issue.id === selectedIssueId.value) ?? null;
 });
+
+const selectedIssueBody = computed(() => {
+  return selectedIssueDetail.value?.raw_content ?? "";
+});
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.detail ?? `Request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function loadIssues() {
+  isLoadingIssues.value = true;
+  errorMessage.value = "";
+
+  try {
+    const payload = await requestJson("/api/issues");
+    issues.value = payload.items ?? [];
+
+    if (!issues.value.length) {
+      selectedIssueId.value = null;
+      selectedPreview.value = null;
+      selectedIssueDetail.value = null;
+      return;
+    }
+
+    const currentExists = issues.value.some((issue) => issue.id === selectedIssueId.value);
+    if (!currentExists) {
+      selectedIssueId.value = issues.value[0].id;
+    }
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isLoadingIssues.value = false;
+  }
+}
+
+async function loadPreview(issueId) {
+  if (!issueId) {
+    selectedPreview.value = null;
+    selectedIssueDetail.value = null;
+    return;
+  }
+
+  isLoadingPreview.value = true;
+  errorMessage.value = "";
+
+  try {
+    const [preview, detail] = await Promise.all([
+      requestJson(`/api/issues/${issueId}/preview`),
+      requestJson(`/api/issues/${issueId}`),
+    ]);
+    selectedPreview.value = preview;
+    selectedIssueDetail.value = detail;
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isLoadingPreview.value = false;
+  }
+}
+
+async function loadLogs() {
+  try {
+    const payload = await requestJson("/api/delivery-logs");
+    logs.value = payload.items ?? [];
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function crawlLatestNews() {
+  isCrawling.value = true;
+  errorMessage.value = "";
+
+  try {
+    await requestJson("/api/crawl/naver-news/latest", {
+      method: "POST",
+      body: JSON.stringify({ limit: 5 }),
+    });
+    await loadIssues();
+    await loadLogs();
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isCrawling.value = false;
+  }
+}
 
 function selectIssue(issueId) {
   selectedIssueId.value = issueId;
 }
+
+watch(selectedIssueId, (issueId) => {
+  void loadPreview(issueId);
+});
+
+onMounted(async () => {
+  await loadIssues();
+  await loadLogs();
+});
 </script>
 
 <template>
@@ -85,14 +133,21 @@ function selectIssue(issueId) {
         <p class="eyebrow">AI Monitor</p>
         <h1>실시간 이슈 자동 보고</h1>
         <p class="hero-copy">
-          필요한 기능만 남긴 화면입니다. 이슈를 선택하면 LLM 요약 기반 Slack 보고 미리보기를 바로 확인할 수 있습니다.
+          FastAPI에서 수집한 네이버 최신 뉴스 데이터를 그대로 불러옵니다. 이슈를 선택하면 자동 보고 미리보기와 원문을 확인할 수 있습니다.
         </p>
       </div>
-      <div class="hero-status">
-        <span class="status-dot"></span>
-        <span>Slack 자동 보고 활성화</span>
+      <div class="hero-actions">
+        <button class="action-button" :disabled="isCrawling" @click="crawlLatestNews">
+          {{ isCrawling ? "수집 중..." : "최신 뉴스 수집" }}
+        </button>
+        <div class="hero-status">
+          <span class="status-dot"></span>
+          <span>FastAPI 연동 활성화</span>
+        </div>
       </div>
     </header>
+
+    <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
 
     <main class="focused-grid">
       <section class="panel issue-list-panel">
@@ -101,11 +156,16 @@ function selectIssue(issueId) {
           <span class="badge">{{ issues.length }}건</span>
         </div>
 
+        <p v-if="isLoadingIssues" class="panel-state">이슈 목록을 불러오는 중입니다.</p>
+        <p v-else-if="!issues.length" class="panel-state">
+          아직 저장된 뉴스가 없습니다. 상단의 `최신 뉴스 수집` 버튼을 눌러주세요.
+        </p>
+
         <div
           v-for="issue in issues"
           :key="issue.id"
           class="issue-row"
-          :class="{ selected: issue.id === selectedIssue.id }"
+          :class="{ selected: issue.id === selectedIssue?.id }"
           @click="selectIssue(issue.id)"
         >
           <div class="issue-row-top">
@@ -115,7 +175,7 @@ function selectIssue(issueId) {
           <h3>{{ issue.title }}</h3>
           <p>{{ issue.source }}</p>
           <div class="issue-meta">
-            <span>{{ issue.reportStatus }}</span>
+            <span>{{ issue.report_status }}</span>
           </div>
         </div>
       </section>
@@ -123,24 +183,38 @@ function selectIssue(issueId) {
       <section class="panel preview-panel">
         <div class="panel-header">
           <h2>자동 보고 미리보기</h2>
-          <span class="badge active">Slack</span>
+          <span class="badge active">AI 요약 + Slack</span>
         </div>
 
-        <div class="preview-card">
-          <p class="preview-channel"># exec-briefing</p>
-          <h3 class="detail-title">{{ selectedIssue.title }}</h3>
-          <p class="detail-summary">{{ selectedIssue.summary }}</p>
+        <p v-if="isLoadingPreview" class="panel-state">선택한 이슈를 불러오는 중입니다.</p>
+        <p v-else-if="!selectedPreview" class="panel-state">
+          왼쪽에서 이슈를 선택하면 자동 보고 미리보기가 표시됩니다.
+        </p>
+
+        <div v-else class="preview-card">
+          <p class="preview-channel">{{ selectedPreview.destination }}</p>
+          <h3 class="detail-title">{{ selectedPreview.title }}</h3>
+          <div class="summary-box">
+            <div class="panel-header compact">
+              <h2>AI 요약</h2>
+              <span class="badge subtle">gpt-5.4-mini</span>
+            </div>
+            <p class="detail-summary">{{ selectedPreview.summary }}</p>
+          </div>
 
           <div class="detail-grid single">
             <div>
               <span class="detail-label">출처</span>
-              <strong>{{ selectedIssue.source }}</strong>
+              <strong>{{ selectedPreview.source }}</strong>
             </div>
           </div>
 
-          <div class="slack-message">
-            <p>*[긴급 이슈 브리핑]* {{ selectedIssue.title }}</p>
-            <p>요약: {{ selectedIssue.summary }}</p>
+          <div class="article-body">
+            <div class="panel-header compact">
+              <h2>기사 원문</h2>
+              <span class="badge subtle">DB 저장값</span>
+            </div>
+            <p>{{ selectedIssueBody }}</p>
           </div>
         </div>
       </section>
@@ -148,8 +222,10 @@ function selectIssue(issueId) {
       <section class="panel log-panel">
         <div class="panel-header">
           <h2>채널 전송 로그</h2>
-          <span class="badge subtle">최근 3건</span>
+          <span class="badge subtle">{{ logs.length }}건</span>
         </div>
+
+        <p v-if="!logs.length" class="panel-state">아직 저장된 채널 전송 로그가 없습니다.</p>
 
         <div v-for="log in logs" :key="log.id" class="log-row">
           <div>
