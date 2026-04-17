@@ -10,6 +10,7 @@ from ..models import DeliveryLog, Issue, IssueSummary, Report
 from ..repository import get_or_create_default_channel, get_or_create_source, normalize_preview_text
 from .naver_latest_crawler import CrawledArticle
 from .openai_summary import OpenAISummaryService
+from .slack_reporter import SlackReporter
 
 
 @dataclass
@@ -38,7 +39,7 @@ def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> Ingest
                 existing.published_at = article.published_at
                 existing.raw_content = article.raw_content
                 existing.updated_at = datetime.now(timezone.utc)
-                update_reporting_state(db, existing, channel.id)
+                update_reporting_state(db, existing, channel.id, should_send=False)
                 skipped_count += 1
                 continue
 
@@ -57,7 +58,7 @@ def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> Ingest
             )
             db.add(issue)
             db.flush()
-            update_reporting_state(db, issue, channel.id)
+            update_reporting_state(db, issue, channel.id, should_send=True)
             saved_count += 1
         except Exception:
             failed_count += 1
@@ -75,7 +76,7 @@ def build_unique_hash(article_url: str) -> str:
     return hashlib.sha256(article_url.encode("utf-8")).hexdigest()
 
 
-def update_reporting_state(db: Session, issue: Issue, channel_id: int) -> None:
+def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should_send: bool) -> None:
     summary_text, llm_provider, llm_model, summary_status = build_summary(
         title=issue.title,
         press_name=issue.press_name or "",
@@ -119,19 +120,36 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int) -> None:
         report.report_title = issue.title
         report.preview_message = preview_message
 
-    delivery_log = db.scalar(
-        select(DeliveryLog).where(DeliveryLog.report_id == report.id).order_by(DeliveryLog.created_at.desc())
+    if not should_send:
+        return
+
+    delivery_log = DeliveryLog(
+        report_id=report.id,
+        channel_id=channel_id,
+        delivery_status="pending",
+        delivered_at=None,
+        retry_count=0,
     )
-    if delivery_log is None:
-        db.add(
-            DeliveryLog(
-                report_id=report.id,
-                channel_id=channel_id,
-                delivery_status="pending",
-                delivered_at=None,
-                retry_count=0,
-            )
-        )
+    db.add(delivery_log)
+    db.flush()
+
+    if not settings.slack_auto_send:
+        report.report_status = "ready"
+        return
+
+    send_result = SlackReporter().send_summary(summary_text)
+    if send_result.success:
+        delivery_log.delivery_status = "sent"
+        delivery_log.delivered_at = datetime.now(timezone.utc)
+        delivery_log.response_code = str(send_result.status_code) if send_result.status_code is not None else None
+        delivery_log.response_body = send_result.response_body
+        report.report_status = "sent"
+    else:
+        delivery_log.delivery_status = "failed"
+        delivery_log.error_message = send_result.error_message
+        delivery_log.response_code = str(send_result.status_code) if send_result.status_code is not None else None
+        delivery_log.response_body = send_result.response_body
+        report.report_status = "failed"
 
 
 def build_summary(*, title: str, press_name: str, raw_content: str) -> tuple[str, str, str, str]:

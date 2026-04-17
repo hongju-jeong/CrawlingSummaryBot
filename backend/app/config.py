@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     crawler_source_base_url: str = "https://news.naver.com/"
     default_report_channel: str = "Slack"
     default_report_destination: str = "#exec-briefing"
+    slack_webhook_url: str | None = None
+    slack_auto_send: bool = True
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "low"
