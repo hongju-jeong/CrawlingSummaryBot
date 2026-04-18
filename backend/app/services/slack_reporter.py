@@ -18,7 +18,14 @@ class SlackReporter:
         self.webhook_url = settings.slack_webhook_url
         self.timeout = settings.crawler_timeout_seconds
 
-    def send_summary(self, summary_text: str) -> SlackSendResult:
+    def send_summary(
+        self,
+        summary_text: str,
+        *,
+        topic: str,
+        source_name: str,
+        article_url: str | None,
+    ) -> SlackSendResult:
         if not self.webhook_url:
             return SlackSendResult(
                 success=False,
@@ -28,8 +35,15 @@ class SlackReporter:
             )
 
         try:
+            lines = [
+                f"[{topic}] {summary_text}",
+                f"출처: {source_name}",
+            ]
+            if article_url:
+                lines.append(f"링크: {article_url}")
+            message = "\n".join(lines)
             with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(self.webhook_url, json={"text": summary_text})
+                response = client.post(self.webhook_url, json={"text": message})
                 ok = response.status_code >= 200 and response.status_code < 300
                 return SlackSendResult(
                     success=ok,

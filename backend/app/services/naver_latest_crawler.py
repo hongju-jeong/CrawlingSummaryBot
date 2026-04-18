@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urljoin
 import re
@@ -8,19 +7,10 @@ from bs4 import BeautifulSoup
 from zoneinfo import ZoneInfo
 
 from ..config import settings
+from .source_types import CrawledArticle
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 ARTICLE_LINK_PATTERN = re.compile(r"^https://n\.news\.naver\.com/article/\d+/\d+$")
-
-
-@dataclass
-class CrawledArticle:
-    title: str
-    article_url: str
-    press_name: str
-    published_at: datetime | None
-    raw_content: str
-
 
 class NaverLatestNewsCrawler:
     def __init__(self) -> None:
@@ -79,6 +69,9 @@ class NaverLatestNewsCrawler:
             press_name=press_name,
             published_at=published_at,
             raw_content=raw_content,
+            source_name=settings.crawler_source_name,
+            source_type="html",
+            region="KR",
         )
 
     @staticmethod

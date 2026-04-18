@@ -21,6 +21,7 @@ class ReportPreviewResponse(BaseModel):
     issue_id: int
     title: str
     source: str
+    category: str
     channel: str
     destination: str
     summary: str
@@ -40,6 +41,7 @@ class IssueDetailResponse(BaseModel):
 class DeliveryLogItem(BaseModel):
     id: int
     title: str
+    category: str
     channel: str
     time: str
     status: str
@@ -61,6 +63,7 @@ class LatestNewsCrawlRequest(BaseModel):
 
 class CrawlJobSummaryResponse(BaseModel):
     source: str
+    sources: list[str] = []
     requested_count: int
     collected_count: int
     saved_count: int

@@ -18,7 +18,7 @@ def list_issues(db: Session) -> list[dict]:
             "source": issue.press_name or (issue.source.name if issue.source else settings.crawler_source_name),
             "category": issue.category,
             "time": format_relative_time(issue.published_at or issue.collected_at),
-            "report_status": "수집 완료",
+            "report_status": to_issue_status(issue.status),
         }
         for issue in issues
     ]
@@ -43,10 +43,11 @@ def get_issue_preview(db: Session, issue_id: int) -> dict | None:
             "issue_id": issue.id,
             "title": issue.title,
             "source": issue.press_name or (issue.source.name if issue.source else settings.crawler_source_name),
+            "category": issue.category,
             "channel": settings.default_report_channel,
             "destination": settings.default_report_destination,
             "summary": summary,
-            "preview_message": f"*[최신 뉴스 브리핑]* {issue.title}\n요약: {summary}",
+            "preview_message": f"[{issue.category}] {summary}",
         }
 
     return {
@@ -55,6 +56,7 @@ def get_issue_preview(db: Session, issue_id: int) -> dict | None:
         "source": report.issue.press_name or (
             report.issue.source.name if report.issue.source else settings.crawler_source_name
         ),
+        "category": report.issue.category,
         "channel": report.channel.name,
         "destination": report.channel.destination,
         "summary": report.summary.summary_text,
@@ -90,6 +92,7 @@ def list_delivery_logs(db: Session) -> list[dict]:
         {
             "id": row.id,
             "title": row.report.issue.title if row.report and row.report.issue else "제목 없음",
+            "category": row.report.issue.category if row.report and row.report.issue else "사회",
             "channel": row.channel.name if row.channel else settings.default_report_channel,
             "time": format_log_time(row.delivered_at or row.created_at),
             "status": to_display_status(row.delivery_status),
@@ -99,15 +102,17 @@ def list_delivery_logs(db: Session) -> list[dict]:
     ]
 
 
-def get_or_create_source(db: Session) -> Source:
-    source = db.scalar(select(Source).where(Source.name == settings.crawler_source_name))
+def get_or_create_source(db: Session, *, name: str, source_type: str, base_url: str) -> Source:
+    source = db.scalar(select(Source).where(Source.name == name))
     if source is not None:
+        source.source_type = source_type
+        source.base_url = base_url
         return source
 
     source = Source(
-        name=settings.crawler_source_name,
-        source_type="crawler",
-        base_url=settings.crawler_source_base_url,
+        name=name,
+        source_type=source_type,
+        base_url=base_url,
         is_active=True,
     )
     db.add(source)
@@ -169,5 +174,15 @@ def to_display_status(status: str) -> str:
         "pending": "대기",
         "sent": "성공",
         "failed": "실패",
+    }
+    return mapping.get(status, status)
+
+
+def to_issue_status(status: str) -> str:
+    mapping = {
+        "collected": "수집 완료",
+        "summarized": "AI 요약 완료",
+        "sent": "전송 완료",
+        "failed": "전송 실패",
     }
     return mapping.get(status, status)

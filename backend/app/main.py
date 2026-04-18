@@ -18,6 +18,7 @@ from .schemas import (
     ReportPreviewResponse,
 )
 from .services.issue_ingestion import save_crawled_articles
+from .services.multi_source_crawler import MultiSourcePollingCrawler
 from .services.naver_latest_crawler import NaverLatestNewsCrawler
 from .services.scheduler import start_scheduler, stop_scheduler
 
@@ -52,6 +53,31 @@ def health_check() -> HealthResponse:
 
 
 @app.post(
+    f"{settings.api_prefix}/crawl/latest",
+    response_model=CrawlJobSummaryResponse,
+    summary="다중 소스 최신 소식 수동 수집",
+    description="국내외 뉴스 사이트, 공식 API, 실험적 X 소스를 병렬 수집해 DB에 저장합니다.",
+)
+def crawl_latest_sources(
+    request: LatestNewsCrawlRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+) -> CrawlJobSummaryResponse:
+    payload = request or LatestNewsCrawlRequest(limit=settings.crawler_limit_per_source)
+    crawler = MultiSourcePollingCrawler()
+    articles = crawler.crawl_latest(payload.limit)
+    result = save_crawled_articles(db, articles)
+    return CrawlJobSummaryResponse(
+        source="multi-source",
+        sources=sorted({article.source_name for article in articles}),
+        requested_count=payload.limit,
+        collected_count=result.collected_count,
+        saved_count=result.saved_count,
+        skipped_count=result.skipped_count,
+        failed_count=result.failed_count,
+    )
+
+
+@app.post(
     f"{settings.api_prefix}/crawl/naver-news/latest",
     response_model=CrawlJobSummaryResponse,
     summary="네이버 최신 뉴스 수동 수집",
@@ -70,6 +96,7 @@ def crawl_latest_news(
     result = save_crawled_articles(db, articles)
     return CrawlJobSummaryResponse(
         source=settings.crawler_source_name,
+        sources=[settings.crawler_source_name],
         requested_count=payload.limit,
         collected_count=result.collected_count,
         saved_count=result.saved_count,

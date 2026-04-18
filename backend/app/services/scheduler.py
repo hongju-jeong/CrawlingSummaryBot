@@ -4,7 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from ..config import settings
 from ..database import SessionLocal
 from .issue_ingestion import save_crawled_articles
-from .naver_latest_crawler import NaverLatestNewsCrawler
+from .multi_source_crawler import MultiSourcePollingCrawler
 
 scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 
@@ -12,8 +12,8 @@ scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 def run_latest_news_job() -> None:
     db = SessionLocal()
     try:
-        crawler = NaverLatestNewsCrawler()
-        articles = crawler.crawl_latest_news(settings.crawler_max_items_per_run)
+        crawler = MultiSourcePollingCrawler()
+        articles = crawler.crawl_latest(settings.crawler_limit_per_source)
         save_crawled_articles(db, articles)
     except Exception:
         db.rollback()
@@ -28,7 +28,7 @@ def start_scheduler() -> None:
     scheduler.add_job(
         run_latest_news_job,
         trigger=IntervalTrigger(minutes=settings.crawler_interval_minutes),
-        id="naver_latest_news_crawl",
+        id="multi_source_latest_news_crawl",
         replace_existing=True,
     )
     scheduler.start()

@@ -21,7 +21,7 @@ def seed_issue() -> int:
             external_id="https://n.news.naver.com/article/021/0002785289",
             title="테스트 기사",
             original_url="https://n.news.naver.com/article/021/0002785289",
-            category="뉴스",
+            category="정치",
             raw_content="테스트 본문입니다. 자동 보고 미리보기에서 요약으로 사용됩니다.",
             unique_hash="abc123",
             status="collected",
@@ -46,7 +46,11 @@ def seed_issue() -> int:
             summary_id=summary.id,
             channel_id=channel.id,
             report_title=issue.title,
-            preview_message="*[최신 뉴스 브리핑]* 테스트 기사\n요약: 테스트 본문입니다. 자동 보고 미리보기에서 요약으로 사용됩니다.",
+            preview_message=(
+                "[정치] 테스트 본문입니다. 자동 보고 미리보기에서 요약으로 사용됩니다.\n"
+                "출처: 문화일보\n"
+                "링크: https://n.news.naver.com/article/021/0002785289"
+            ),
             report_status="ready",
         )
         db.add(report)
@@ -81,18 +85,23 @@ def test_issue_endpoints_return_db_data():
         assert isinstance(preview_response, ReportPreviewResponse)
         assert preview_response.title == "테스트 기사"
         assert preview_response.source == "문화일보"
+        assert preview_response.category == "정치"
         assert "테스트 본문" in preview_response.summary
+        assert "출처: 문화일보" in preview_response.preview_message
+        assert "링크: https://n.news.naver.com/article/021/0002785289" in preview_response.preview_message
 
         detail_response = read_issue_detail(issue_id, db)
         assert isinstance(detail_response, IssueDetailResponse)
         assert detail_response.title == "테스트 기사"
         assert detail_response.source == "문화일보"
+        assert detail_response.category == "정치"
         assert detail_response.raw_content == "테스트 본문입니다. 자동 보고 미리보기에서 요약으로 사용됩니다."
 
         logs_response = read_delivery_logs(db)
         assert isinstance(logs_response, DeliveryLogListResponse)
         assert logs_response.total == 1
         assert logs_response.items[0].channel == "Slack"
+        assert logs_response.items[0].category == "정치"
         assert logs_response.items[0].status == "대기"
     finally:
         db.close()

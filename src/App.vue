@@ -99,7 +99,7 @@ async function crawlLatestNews() {
   errorMessage.value = "";
 
   try {
-    await requestJson("/api/crawl/naver-news/latest", {
+    await requestJson("/api/crawl/latest", {
       method: "POST",
       body: JSON.stringify({ limit: 5 }),
     });
@@ -133,7 +133,7 @@ onMounted(async () => {
         <p class="eyebrow">AI Monitor</p>
         <h1>실시간 이슈 자동 보고</h1>
         <p class="hero-copy">
-          FastAPI에서 수집한 네이버 최신 뉴스 데이터를 그대로 불러옵니다. 이슈를 선택하면 자동 보고 미리보기와 원문을 확인할 수 있습니다.
+          FastAPI에서 수집한 국내외 최신 소식을 그대로 불러옵니다. 이슈를 선택하면 AI 요약과 원문을 확인할 수 있습니다.
         </p>
       </div>
       <div class="hero-actions">
@@ -199,6 +199,7 @@ onMounted(async () => {
               <h2>AI 요약</h2>
               <span class="badge subtle">gpt-5.4-mini</span>
             </div>
+            <p class="preview-channel">주제 · {{ selectedPreview.category }}</p>
             <p class="detail-summary">{{ selectedPreview.summary }}</p>
           </div>
 
@@ -230,7 +231,7 @@ onMounted(async () => {
         <div v-for="log in logs" :key="log.id" class="log-row">
           <div>
             <strong>{{ log.title }}</strong>
-            <p>{{ log.channel }} · {{ log.time }}</p>
+            <p>{{ log.category }} · {{ log.channel }} · {{ log.time }}</p>
           </div>
           <span
             class="badge"

@@ -32,4 +32,14 @@ def test_extract_article_fields_from_html():
 
 def test_build_unique_hash_is_stable():
     article_url = "https://n.news.naver.com/article/021/0002785289"
-    assert build_unique_hash(article_url) == build_unique_hash(article_url)
+    assert build_unique_hash(
+        article_url=article_url,
+        title="기사 제목",
+        press_name="문화일보",
+        published_at=None,
+    ) == build_unique_hash(
+        article_url=article_url,
+        title="기사 제목",
+        press_name="문화일보",
+        published_at=None,
+    )
