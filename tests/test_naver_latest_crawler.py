@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 
-from backend.app.services.issue_ingestion import build_unique_hash
-from backend.app.services.naver_latest_crawler import NaverLatestNewsCrawler
+from backend.app.services.crawling.naver_latest_crawler import NaverLatestNewsCrawler
+from backend.app.services.ingestion.issue_ingestion import build_unique_hash
 
 
 def test_extract_article_fields_from_html():

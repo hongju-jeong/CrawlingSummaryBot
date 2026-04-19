@@ -6,7 +6,7 @@ import httpx
 from bs4 import BeautifulSoup
 from zoneinfo import ZoneInfo
 
-from ..config import settings
+from ...config import settings
 from .source_types import CrawledArticle
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")

@@ -13,12 +13,86 @@ uvicorn backend.app.main:app --reload
 ## Endpoints
 
 - `GET /health`
+- `GET /api/runtime-profile`
 - `POST /api/crawl/latest`
 - `POST /api/crawl/naver-news/latest`
 - `GET /api/issues`
 - `GET /api/issues/{issue_id}`
 - `GET /api/issues/{issue_id}/preview`
 - `GET /api/delivery-logs`
+
+## Structure
+
+백엔드는 역할 기준으로 아래처럼 나눕니다.
+
+```text
+backend/app/
+  api/
+    routes/
+      crawl.py
+      delivery_logs.py
+      health.py
+      issues.py
+      runtime_profile.py
+  services/
+    crawling/
+      gnews_api_crawler.py
+      html_source_crawler.py
+      multi_source_crawler.py
+      naver_latest_crawler.py
+      source_registry.py
+      source_types.py
+      x_experimental_crawler.py
+    ingestion/
+      issue_ingestion.py
+      topic_classifier.py
+    reporting/
+      openai_summary.py
+      slack_reporter.py
+    runtime/
+      runtime_profile.py
+      scheduler.py
+  config.py
+  database.py
+  models.py
+  repository.py
+  schemas.py
+  main.py
+```
+
+### Module ownership
+
+- `api/routes`
+  - FastAPI 엔드포인트만 둡니다.
+  - 요청/응답 조립과 HTTP 예외 처리만 담당합니다.
+- `services/crawling`
+  - 외부 소스에서 데이터를 가져오는 로직만 둡니다.
+  - 새 뉴스 소스 추가는 이 디렉토리 안에서 끝나는 것이 목표입니다.
+- `services/ingestion`
+  - 중복 체크, 저장, 주제 분류, 후처리 큐 등록을 담당합니다.
+- `services/reporting`
+  - AI 요약과 Slack 전송처럼 외부 보고 채널 연동만 담당합니다.
+- `services/runtime`
+  - 스케줄링, 런타임 튜닝, 머신 스펙 기반 추천값 계산을 담당합니다.
+- `repository.py`
+  - 읽기 전용 조회와 응답 변환을 담당합니다.
+- `main.py`
+  - 앱 생성과 라우터 등록만 담당합니다.
+
+### Change boundaries
+
+기능 브랜치를 작게 유지하려면 아래 기준을 따릅니다.
+
+- 새 크롤러 추가
+  - `services/crawling/*`
+- 주제 분류/저장 정책 변경
+  - `services/ingestion/*`
+- AI 요약/Slack 포맷 변경
+  - `services/reporting/*`
+- 실행 프로필/스케줄 변경
+  - `services/runtime/*`
+- API 응답 형식 변경
+  - `api/routes/*`, `schemas.py`, `repository.py`
 
 ## Environment
 

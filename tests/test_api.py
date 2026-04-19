@@ -1,5 +1,6 @@
+from backend.app.api.routes.delivery_logs import read_delivery_logs
+from backend.app.api.routes.issues import read_issue_detail, read_issue_preview, read_issues
 from backend.app.database import Base, SessionLocal, engine
-from backend.app.main import read_delivery_logs, read_issue_detail, read_issue_preview, read_issues
 from backend.app.models import DeliveryLog, Issue, IssueSummary, Report, ReportChannel, Source
 from backend.app.schemas import DeliveryLogListResponse, IssueDetailResponse, IssueListResponse, ReportPreviewResponse
 

@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-from ..config import settings
+from ...config import settings
 
 
 class OpenAISummaryService:

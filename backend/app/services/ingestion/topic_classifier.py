@@ -1,8 +1,8 @@
 from collections import defaultdict
 import json
 
-from ..config import settings
-from .source_types import (
+from ...config import settings
+from ..crawling.source_types import (
     TOPICS,
     TOPIC_ECONOMY,
     TOPIC_ENTERTAINMENT,
@@ -193,4 +193,3 @@ def classify_topic_with_llm(*, title: str, raw_content: str, source_name: str) -
     if topic in TOPICS:
         return topic
     return None
-

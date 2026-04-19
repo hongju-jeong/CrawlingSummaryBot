@@ -7,14 +7,14 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ..config import settings
-from ..database import SessionLocal
-from ..models import DeliveryLog, Issue, IssueSummary, Report
-from ..repository import get_or_create_default_channel, get_or_create_source, normalize_preview_text
-from .openai_summary import OpenAISummaryService
-from .runtime_profile import get_effective_report_worker_threads
-from .slack_reporter import SlackReporter
-from .source_types import CrawledArticle
+from ...config import settings
+from ...database import SessionLocal
+from ...models import DeliveryLog, Issue, IssueSummary, Report
+from ...repository import get_or_create_default_channel, get_or_create_source, normalize_preview_text
+from ..reporting.openai_summary import OpenAISummaryService
+from ..runtime.runtime_profile import get_effective_report_worker_threads
+from ..reporting.slack_reporter import SlackReporter
+from ..crawling.source_types import CrawledArticle
 from .topic_classifier import classify_topic
 
 

@@ -1,10 +1,10 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ..config import settings
-from ..database import SessionLocal
-from .issue_ingestion import save_crawled_articles
-from .multi_source_crawler import MultiSourcePollingCrawler
+from ...config import settings
+from ...database import SessionLocal
+from ..ingestion.issue_ingestion import save_crawled_articles
+from ..crawling.multi_source_crawler import MultiSourcePollingCrawler
 
 scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 

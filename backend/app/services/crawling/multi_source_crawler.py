@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import httpx
 
-from ..config import settings
+from ...config import settings
 from .gnews_api_crawler import GNewsAPICrawler
 from .html_source_crawler import HTMLSourceCrawler
-from .runtime_profile import (
+from ..runtime.runtime_profile import (
     get_effective_crawler_concurrency_per_process,
     get_effective_crawler_processes,
 )

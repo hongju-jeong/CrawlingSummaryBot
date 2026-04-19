@@ -8,8 +8,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from ..config import settings
-from .runtime_profile import get_effective_crawler_host_concurrency
+from ...config import settings
+from ..runtime.runtime_profile import get_effective_crawler_host_concurrency
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle
 

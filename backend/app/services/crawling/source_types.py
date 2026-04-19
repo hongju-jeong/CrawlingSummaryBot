@@ -43,4 +43,3 @@ class CrawledArticle:
     region: str | None = None
     topic_hint: str | None = None
     priority_score: int = 0
-

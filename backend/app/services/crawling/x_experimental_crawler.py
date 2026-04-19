@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from ..config import settings
+from ...config import settings
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle, TOPIC_POLITICS
 
@@ -52,4 +52,3 @@ class XExperimentalCrawler:
                 continue
 
         return articles
-

@@ -1,6 +1,6 @@
-from backend.app.services.html_source_crawler import HTMLSourceCrawler
-from backend.app.services.source_registry import SourceDefinition
-from backend.app.services.topic_classifier import classify_topic
+from backend.app.services.crawling.html_source_crawler import HTMLSourceCrawler
+from backend.app.services.crawling.source_registry import SourceDefinition
+from backend.app.services.ingestion.topic_classifier import classify_topic
 
 
 def test_classify_topic_prefers_economy_keywords():

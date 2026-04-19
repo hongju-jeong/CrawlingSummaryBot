@@ -2,7 +2,7 @@ from datetime import datetime
 
 import httpx
 
-from ..config import settings
+from ...config import settings
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle
 
@@ -61,4 +61,3 @@ class GNewsAPICrawler:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-

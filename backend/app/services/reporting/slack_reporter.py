@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from ..config import settings
+from ...config import settings
 
 
 @dataclass
