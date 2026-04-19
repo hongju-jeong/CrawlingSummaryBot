@@ -9,6 +9,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from ..config import settings
+from .runtime_profile import get_effective_crawler_host_concurrency
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle
 
@@ -83,7 +84,7 @@ class HTMLSourceCrawler:
         host_limiters: dict[str, asyncio.Semaphore],
     ) -> str:
         host = urlparse(url).netloc
-        limiter = host_limiters.setdefault(host, asyncio.Semaphore(settings.crawler_host_concurrency))
+        limiter = host_limiters.setdefault(host, asyncio.Semaphore(get_effective_crawler_host_concurrency()))
         for attempt in range(settings.crawler_retry_count + 1):
             try:
                 async with limiter:
