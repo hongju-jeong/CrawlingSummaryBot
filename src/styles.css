@@ -51,6 +51,10 @@ select {
   gap: 20px;
 }
 
+.dashboard-shell {
+  padding-bottom: 36px;
+}
+
 .eyebrow {
   margin: 0 0 10px;
   color: var(--accent-deep);
@@ -233,12 +237,101 @@ h1 {
   gap: 20px;
 }
 
+.monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 0.95fr 0.95fr;
+  gap: 20px;
+}
+
+.stat-card {
+  display: grid;
+  gap: 8px;
+}
+
+.stat-card strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.stat-card p {
+  color: var(--muted);
+}
+
+.live-panel,
+.activity-panel,
+.issue-list-panel,
+.preview-panel,
+.log-panel {
+  display: grid;
+  align-content: start;
+  min-height: 360px;
+}
+
+.live-panel {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.activity-panel {
+  grid-column: 2;
+}
+
+.issue-list-panel {
+  grid-column: 3;
+}
+
+.preview-panel {
+  grid-column: 2;
+}
+
+.log-panel {
+  grid-column: 3;
+}
+
 .issue-list-panel,
 .preview-panel,
 .log-panel {
   display: grid;
   align-content: start;
   min-height: 620px;
+}
+
+.live-item,
+.activity-row {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(35, 28, 20, 0.08);
+}
+
+.live-item + .live-item,
+.activity-row + .activity-row {
+  margin-top: 12px;
+}
+
+.live-item h3,
+.activity-row strong {
+  display: block;
+  margin: 10px 0 6px;
+  line-height: 1.35;
+}
+
+.live-item p,
+.activity-row p,
+.live-summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.live-summary {
+  margin-top: 10px;
 }
 
 .issue-row {
@@ -379,8 +472,23 @@ h1 {
 }
 
 @media (max-width: 1180px) {
+  .monitor-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-grid,
   .focused-grid {
     grid-template-columns: 1fr;
+  }
+
+  .live-panel,
+  .activity-panel,
+  .issue-list-panel,
+  .preview-panel,
+  .log-panel {
+    grid-column: auto;
+    grid-row: auto;
+    min-height: auto;
   }
 }
 
@@ -400,6 +508,10 @@ h1 {
   }
 
   .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .monitor-grid {
     grid-template-columns: 1fr;
   }
 }

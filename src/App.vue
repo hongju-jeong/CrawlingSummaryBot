@@ -10,6 +10,17 @@ const isLoadingIssues = ref(false);
 const isLoadingPreview = ref(false);
 const isCrawling = ref(false);
 const errorMessage = ref("");
+const monitoringSummary = ref({
+  processCount: 0,
+  sourceGroups: [],
+  discoveredCount: 0,
+  savedCount: 0,
+  skippedCount: 0,
+  failedCount: 0,
+  sentCount: 0,
+});
+const liveItems = ref([]);
+const activityFeed = ref([]);
 
 const selectedIssue = computed(() => {
   return issues.value.find((issue) => issue.id === selectedIssueId.value) ?? null;
@@ -94,15 +105,170 @@ async function loadLogs() {
   }
 }
 
+function resetMonitoringState() {
+  monitoringSummary.value = {
+    processCount: 0,
+    sourceGroups: [],
+    discoveredCount: 0,
+    savedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    sentCount: 0,
+  };
+  liveItems.value = [];
+  activityFeed.value = [];
+}
+
+function upsertLiveItem(event) {
+  const identity = event.issue_id ?? event.url ?? `${event.source}-${event.title}`;
+  if (!identity) {
+    return;
+  }
+
+  const current = liveItems.value.find((item) => item.identity === identity);
+  if (!current) {
+    liveItems.value.unshift({
+      identity,
+      title: event.title ?? "제목 없음",
+      source: event.source ?? "출처 미상",
+      category: event.category ?? "-",
+      stage: mapStageLabel(event.type),
+      statusTone: mapStageTone(event.type),
+      summary: event.summary ?? "",
+    });
+    return;
+  }
+
+  current.title = event.title ?? current.title;
+  current.source = event.source ?? current.source;
+  current.category = event.category ?? current.category;
+  current.stage = mapStageLabel(event.type);
+  current.statusTone = mapStageTone(event.type);
+  if (event.summary) {
+    current.summary = event.summary;
+  }
+}
+
+function pushActivity(event) {
+  activityFeed.value.unshift({
+    id: `${Date.now()}-${Math.random()}`,
+    stage: mapStageLabel(event.type),
+    title: event.title ?? (event.type === "run_started" ? "크롤링 실행" : "이벤트"),
+    meta: buildActivityMeta(event),
+    tone: mapStageTone(event.type),
+  });
+  activityFeed.value = activityFeed.value.slice(0, 24);
+}
+
+function buildActivityMeta(event) {
+  if (event.type === "run_started") {
+    return `프로세스 ${event.process_count}개 · 그룹 ${event.source_groups.join(", ")}`;
+  }
+  if (event.type === "crawl_completed") {
+    return `수집 후보 ${event.discovered_count}건`;
+  }
+  if (event.type === "run_completed") {
+    return `저장 ${event.saved_count} · 전송대기 ${event.skipped_count} · 실패 ${event.failed_count}`;
+  }
+  const parts = [];
+  if (event.source) parts.push(event.source);
+  if (event.category) parts.push(event.category);
+  if (event.error) parts.push(event.error);
+  return parts.join(" · ");
+}
+
+function mapStageLabel(type) {
+  const mapping = {
+    run_started: "크롤러 시작",
+    crawl_completed: "수집 완료",
+    item_started: "기사 처리 시작",
+    item_saved: "DB 저장",
+    summary_completed: "AI 요약 완료",
+    delivery_started: "Slack 전송 시작",
+    delivery_sent: "Slack 전송 완료",
+    delivery_failed: "Slack 전송 실패",
+    delivery_ready: "전송 준비",
+    item_skipped: "중복 건너뜀",
+    item_failed: "처리 실패",
+    item_completed: "처리 완료",
+    run_completed: "작업 완료",
+    run_failed: "작업 실패",
+  };
+  return mapping[type] ?? type;
+}
+
+function mapStageTone(type) {
+  if (["delivery_sent", "run_completed", "summary_completed"].includes(type)) return "active";
+  if (["delivery_started", "item_started", "item_saved", "crawl_completed", "delivery_ready"].includes(type)) {
+    return "warning";
+  }
+  if (["delivery_failed", "item_failed", "run_failed"].includes(type)) return "danger";
+  return "subtle";
+}
+
+function applyStreamEvent(event) {
+  if (event.process_count !== undefined) {
+    monitoringSummary.value.processCount = event.process_count;
+  }
+  if (event.source_groups) {
+    monitoringSummary.value.sourceGroups = event.source_groups;
+  }
+  if (event.discovered_count !== undefined) {
+    monitoringSummary.value.discoveredCount = event.discovered_count;
+  }
+  if (event.saved_count !== undefined) {
+    monitoringSummary.value.savedCount = event.saved_count;
+  }
+  if (event.skipped_count !== undefined) {
+    monitoringSummary.value.skippedCount = event.skipped_count;
+  }
+  if (event.failed_count !== undefined) {
+    monitoringSummary.value.failedCount = event.failed_count;
+  }
+  if (event.type === "delivery_sent") {
+    monitoringSummary.value.sentCount += 1;
+  }
+
+  if (event.title || event.issue_id || event.url) {
+    upsertLiveItem(event);
+  }
+  pushActivity(event);
+}
+
 async function crawlLatestNews() {
   isCrawling.value = true;
   errorMessage.value = "";
+  resetMonitoringState();
 
   try {
-    await requestJson("/api/crawl/latest", {
-      method: "POST",
-      body: JSON.stringify({ limit: 5 }),
-    });
+    const response = await fetch("/api/crawl/latest/stream?limit=5");
+    if (!response.ok || !response.body) {
+      throw new Error(`Stream failed: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        applyStreamEvent(event);
+      }
+    }
+
+    if (buffer.trim()) {
+      applyStreamEvent(JSON.parse(buffer));
+    }
+
     await loadIssues();
     await loadLogs();
   } catch (error) {
@@ -127,29 +293,90 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page-shell compact">
+  <div class="page-shell compact dashboard-shell">
     <header class="hero simple">
       <div>
         <p class="eyebrow">AI Monitor</p>
-        <h1>실시간 이슈 자동 보고</h1>
+        <h1>실시간 이슈 모니터링 대시보드</h1>
         <p class="hero-copy">
-          FastAPI에서 수집한 국내외 최신 소식을 그대로 불러옵니다. 이슈를 선택하면 AI 요약과 원문을 확인할 수 있습니다.
+          수집 버튼을 누르면 크롤링 프로세스 수, 기사별 AI 요약, Slack 전송 단계를 실시간으로 추적합니다.
         </p>
       </div>
       <div class="hero-actions">
         <button class="action-button" :disabled="isCrawling" @click="crawlLatestNews">
-          {{ isCrawling ? "수집 중..." : "최신 뉴스 수집" }}
+          {{ isCrawling ? "모니터링 중..." : "최신 뉴스 수집" }}
         </button>
         <div class="hero-status">
           <span class="status-dot"></span>
-          <span>FastAPI 연동 활성화</span>
+          <span>{{ isCrawling ? "실시간 스트리밍 활성화" : "대기 중" }}</span>
         </div>
       </div>
     </header>
 
     <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
 
-    <main class="focused-grid">
+    <section class="monitor-grid">
+      <article class="panel stat-card">
+        <span class="detail-label">크롤링 프로세스</span>
+        <strong>{{ monitoringSummary.processCount }}</strong>
+        <p>{{ monitoringSummary.sourceGroups.join(", ") || "대기 중" }}</p>
+      </article>
+      <article class="panel stat-card">
+        <span class="detail-label">수집 후보</span>
+        <strong>{{ monitoringSummary.discoveredCount }}</strong>
+        <p>실시간 발견 기사 수</p>
+      </article>
+      <article class="panel stat-card">
+        <span class="detail-label">저장 완료</span>
+        <strong>{{ monitoringSummary.savedCount }}</strong>
+        <p>DB 적재 완료 건수</p>
+      </article>
+      <article class="panel stat-card">
+        <span class="detail-label">Slack 전송 완료</span>
+        <strong>{{ monitoringSummary.sentCount }}</strong>
+        <p>실시간 전송 성공 건수</p>
+      </article>
+    </section>
+
+    <main class="dashboard-grid">
+      <section class="panel live-panel">
+        <div class="panel-header">
+          <h2>실시간 처리 현황</h2>
+          <span class="badge warning">{{ liveItems.length }}건 추적 중</span>
+        </div>
+
+        <p v-if="!liveItems.length" class="panel-state">
+          최신 뉴스 수집을 실행하면 기사별 처리 단계가 실시간으로 쌓입니다.
+        </p>
+
+        <div v-for="item in liveItems" :key="item.identity" class="live-item">
+          <div class="issue-row-top">
+            <span class="badge subtle">{{ item.category }}</span>
+            <span class="badge" :class="item.statusTone">{{ item.stage }}</span>
+          </div>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.source }}</p>
+          <p v-if="item.summary" class="live-summary">{{ item.summary }}</p>
+        </div>
+      </section>
+
+      <section class="panel activity-panel">
+        <div class="panel-header">
+          <h2>실시간 이벤트 피드</h2>
+          <span class="badge">{{ activityFeed.length }}개</span>
+        </div>
+
+        <p v-if="!activityFeed.length" class="panel-state">아직 스트리밍 이벤트가 없습니다.</p>
+
+        <div v-for="event in activityFeed" :key="event.id" class="activity-row">
+          <span class="badge" :class="event.tone">{{ event.stage }}</span>
+          <div>
+            <strong>{{ event.title }}</strong>
+            <p>{{ event.meta }}</p>
+          </div>
+        </div>
+      </section>
+
       <section class="panel issue-list-panel">
         <div class="panel-header">
           <h2>실시간 이슈 리스트</h2>

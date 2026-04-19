@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,7 +23,15 @@ class IngestionResult:
     failed_count: int
 
 
-def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> IngestionResult:
+EventCallback = Callable[[str, dict], None]
+
+
+def save_crawled_articles(
+    db: Session,
+    articles: list[CrawledArticle],
+    *,
+    event_callback: EventCallback | None = None,
+) -> IngestionResult:
     channel = get_or_create_default_channel(db)
     saved_count = 0
     skipped_count = 0
@@ -30,6 +39,15 @@ def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> Ingest
 
     for article in articles:
         try:
+            emit_event(
+                event_callback,
+                "item_started",
+                {
+                    "title": article.title,
+                    "source": article.press_name,
+                    "url": article.article_url,
+                },
+            )
             source = get_or_create_source(
                 db,
                 name=article.source_name,
@@ -59,7 +77,17 @@ def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> Ingest
                 existing.region = article.region
                 existing.source_id = source.id
                 existing.updated_at = datetime.now(timezone.utc)
-                update_reporting_state(db, existing, channel.id, should_send=False)
+                update_reporting_state(db, existing, channel.id, should_send=False, event_callback=event_callback)
+                emit_event(
+                    event_callback,
+                    "item_skipped",
+                    {
+                        "title": existing.title,
+                        "source": existing.press_name or article.source_name,
+                        "category": existing.category,
+                        "status": existing.status,
+                    },
+                )
                 skipped_count += 1
                 continue
 
@@ -78,10 +106,28 @@ def save_crawled_articles(db: Session, articles: list[CrawledArticle]) -> Ingest
             )
             db.add(issue)
             db.flush()
-            update_reporting_state(db, issue, channel.id, should_send=True)
+            emit_event(
+                event_callback,
+                "item_saved",
+                {
+                    "issue_id": issue.id,
+                    "title": issue.title,
+                    "source": issue.press_name or issue.source.name if issue.source else issue.press_name or article.source_name,
+                    "category": issue.category,
+                },
+            )
+            update_reporting_state(db, issue, channel.id, should_send=True, event_callback=event_callback)
             saved_count += 1
         except Exception:
             failed_count += 1
+            emit_event(
+                event_callback,
+                "item_failed",
+                {
+                    "title": article.title,
+                    "source": article.press_name or article.source_name,
+                },
+            )
 
     db.commit()
     return IngestionResult(
@@ -106,7 +152,14 @@ def build_unique_hash(
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
 
-def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should_send: bool) -> None:
+def update_reporting_state(
+    db: Session,
+    issue: Issue,
+    channel_id: int,
+    *,
+    should_send: bool,
+    event_callback: EventCallback | None = None,
+) -> None:
     summary_text, llm_provider, llm_model, summary_status = build_summary(
         title=issue.title,
         press_name=issue.press_name or "",
@@ -132,6 +185,18 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should
         summary.llm_model = llm_model
         summary.summary_text = summary_text
         summary.summary_status = summary_status
+
+    emit_event(
+        event_callback,
+        "summary_completed",
+        {
+            "issue_id": issue.id,
+            "title": issue.title,
+            "source": issue.press_name or issue.source.name if issue.source else issue.press_name or "출처 미상",
+            "category": issue.category,
+            "summary": summary_text,
+        },
+    )
 
     preview_lines = [
         f"[{issue.category}] {summary_text}",
@@ -159,6 +224,16 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should
 
     if not should_send:
         issue.status = "summarized"
+        emit_event(
+            event_callback,
+            "item_completed",
+            {
+                "issue_id": issue.id,
+                "title": issue.title,
+                "category": issue.category,
+                "status": issue.status,
+            },
+        )
         return
 
     delivery_log = DeliveryLog(
@@ -174,8 +249,28 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should
     if not settings.slack_auto_send:
         report.report_status = "ready"
         issue.status = "summarized"
+        emit_event(
+            event_callback,
+            "delivery_ready",
+            {
+                "issue_id": issue.id,
+                "title": issue.title,
+                "category": issue.category,
+                "status": report.report_status,
+            },
+        )
         return
 
+    emit_event(
+        event_callback,
+        "delivery_started",
+        {
+            "issue_id": issue.id,
+            "title": issue.title,
+            "category": issue.category,
+            "destination": settings.default_report_destination,
+        },
+    )
     send_result = SlackReporter().send_summary(
         summary_text,
         topic=issue.category,
@@ -189,6 +284,16 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should
         delivery_log.response_body = send_result.response_body
         report.report_status = "sent"
         issue.status = "sent"
+        emit_event(
+            event_callback,
+            "delivery_sent",
+            {
+                "issue_id": issue.id,
+                "title": issue.title,
+                "category": issue.category,
+                "status": "sent",
+            },
+        )
     else:
         delivery_log.delivery_status = "failed"
         delivery_log.error_message = send_result.error_message
@@ -196,6 +301,17 @@ def update_reporting_state(db: Session, issue: Issue, channel_id: int, *, should
         delivery_log.response_body = send_result.response_body
         report.report_status = "failed"
         issue.status = "failed"
+        emit_event(
+            event_callback,
+            "delivery_failed",
+            {
+                "issue_id": issue.id,
+                "title": issue.title,
+                "category": issue.category,
+                "status": "failed",
+                "error": send_result.error_message,
+            },
+        )
 
 
 def build_summary(*, title: str, press_name: str, raw_content: str, topic: str) -> tuple[str, str, str, str]:
@@ -218,3 +334,9 @@ def build_summary(*, title: str, press_name: str, raw_content: str, topic: str) 
         pass
 
     return fallback, "system", "preview-truncation", "completed"
+
+
+def emit_event(event_callback: EventCallback | None, event_type: str, payload: dict) -> None:
+    if event_callback is None:
+        return
+    event_callback(event_type, payload)

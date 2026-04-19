@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
+import json
 
 import httpx
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import get_db, init_db
+from .database import SessionLocal, get_db, init_db
 from .repository import get_issue_detail, get_issue_preview, list_delivery_logs, list_issues
 from .schemas import (
     CrawlJobSummaryResponse,
@@ -77,6 +79,75 @@ def crawl_latest_sources(
     )
 
 
+@app.get(
+    f"{settings.api_prefix}/crawl/latest/stream",
+    summary="다중 소스 최신 소식 스트리밍 수집",
+    description="크롤링 프로세스 수와 기사별 요약/전송 단계를 실시간으로 스트리밍합니다.",
+)
+def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_source, ge=1, le=20)) -> StreamingResponse:
+    def event_stream():
+        groups = [group for group in settings.crawler_enabled_source_groups if group != "x-experimental" or settings.x_experimental_enabled]
+        active_groups = [group for group in groups if group in settings.crawler_enabled_source_groups]
+        process_count = min(settings.crawler_processes, len(active_groups)) if active_groups else 0
+        yield to_ndjson(
+            {
+                "type": "run_started",
+                "process_count": process_count,
+                "source_groups": active_groups,
+                "limit_per_source": limit,
+            }
+        )
+
+        crawler = MultiSourcePollingCrawler()
+        try:
+            articles = crawler.crawl_latest(limit)
+        except Exception as error:
+            yield to_ndjson({"type": "run_failed", "error": str(error)})
+            return
+
+        yield to_ndjson(
+            {
+                "type": "crawl_completed",
+                "discovered_count": len(articles),
+                "sources": sorted({article.source_name for article in articles}),
+            }
+        )
+
+        db = SessionLocal()
+        totals = {
+            "saved_count": 0,
+            "skipped_count": 0,
+            "failed_count": 0,
+        }
+        try:
+            for article in articles:
+                buffered_events: list[dict] = []
+
+                def on_event(event_type: str, payload: dict) -> None:
+                    buffered_events.append({"type": event_type, **payload})
+
+                result = save_crawled_articles(db, [article], event_callback=on_event)
+                totals["saved_count"] += result.saved_count
+                totals["skipped_count"] += result.skipped_count
+                totals["failed_count"] += result.failed_count
+                for event in buffered_events:
+                    yield to_ndjson(event)
+
+            yield to_ndjson(
+                {
+                    "type": "run_completed",
+                    "collected_count": len(articles),
+                    "saved_count": totals["saved_count"],
+                    "skipped_count": totals["skipped_count"],
+                    "failed_count": totals["failed_count"],
+                }
+            )
+        finally:
+            db.close()
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+
 @app.post(
     f"{settings.api_prefix}/crawl/naver-news/latest",
     response_model=CrawlJobSummaryResponse,
@@ -143,3 +214,7 @@ def read_issue_detail(issue_id: int, db: Session = Depends(get_db)) -> IssueDeta
 def read_delivery_logs(db: Session = Depends(get_db)) -> DeliveryLogListResponse:
     items = list_delivery_logs(db)
     return DeliveryLogListResponse(items=items, total=len(items))
+
+
+def to_ndjson(payload: dict) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
