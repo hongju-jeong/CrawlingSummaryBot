@@ -1,15 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
+from ..database import SessionLocal
 from ..models import DeliveryLog, Issue, IssueSummary, Report
 from ..repository import get_or_create_default_channel, get_or_create_source, normalize_preview_text
 from .openai_summary import OpenAISummaryService
+from .runtime_profile import get_effective_report_worker_threads
 from .slack_reporter import SlackReporter
 from .source_types import CrawledArticle
 from .topic_classifier import classify_topic
@@ -36,6 +39,7 @@ def save_crawled_articles(
     saved_count = 0
     skipped_count = 0
     failed_count = 0
+    post_process_jobs: list[tuple[int, int, bool]] = []
 
     for article in articles:
         try:
@@ -77,7 +81,8 @@ def save_crawled_articles(
                 existing.region = article.region
                 existing.source_id = source.id
                 existing.updated_at = datetime.now(timezone.utc)
-                update_reporting_state(db, existing, channel.id, should_send=False, event_callback=event_callback)
+                db.flush()
+                post_process_jobs.append((existing.id, channel.id, False))
                 emit_event(
                     event_callback,
                     "item_skipped",
@@ -116,7 +121,7 @@ def save_crawled_articles(
                     "category": issue.category,
                 },
             )
-            update_reporting_state(db, issue, channel.id, should_send=True, event_callback=event_callback)
+            post_process_jobs.append((issue.id, channel.id, True))
             saved_count += 1
         except Exception:
             failed_count += 1
@@ -130,12 +135,70 @@ def save_crawled_articles(
             )
 
     db.commit()
+    _run_post_process_jobs(post_process_jobs, event_callback=event_callback)
     return IngestionResult(
         collected_count=len(articles),
         saved_count=saved_count,
         skipped_count=skipped_count,
         failed_count=failed_count,
     )
+
+
+def _run_post_process_jobs(
+    jobs: list[tuple[int, int, bool]],
+    *,
+    event_callback: EventCallback | None = None,
+) -> None:
+    if not jobs:
+        return
+
+    max_workers = min(get_effective_report_worker_threads(), len(jobs))
+    if max_workers <= 1:
+        for issue_id, channel_id, should_send in jobs:
+            _process_reporting_job(issue_id, channel_id, should_send, event_callback)
+        return
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="report-worker") as executor:
+        futures = [
+            executor.submit(_process_reporting_job, issue_id, channel_id, should_send, event_callback)
+            for issue_id, channel_id, should_send in jobs
+        ]
+        for future in as_completed(futures):
+            future.result()
+
+
+def _process_reporting_job(
+    issue_id: int,
+    channel_id: int,
+    should_send: bool,
+    event_callback: EventCallback | None = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        issue = db.scalar(
+            select(Issue)
+            .options(joinedload(Issue.source))
+            .where(Issue.id == issue_id)
+        )
+        if issue is None:
+            return
+        update_reporting_state(db, issue, channel_id, should_send=should_send, event_callback=event_callback)
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        emit_event(
+            event_callback,
+            "item_failed",
+            {
+                "issue_id": issue_id,
+                "title": getattr(locals().get("issue"), "title", "알 수 없는 기사"),
+                "category": getattr(locals().get("issue"), "category", "미분류"),
+                "status": "failed",
+                "error": str(error),
+            },
+        )
+    finally:
+        db.close()
 
 def build_unique_hash(
     *,

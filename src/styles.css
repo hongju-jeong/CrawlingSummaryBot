@@ -102,6 +102,13 @@ h1 {
   line-height: 1.6;
 }
 
+.runtime-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .action-button {
   border: 0;
   border-radius: 999px;
@@ -191,6 +198,13 @@ h1 {
 .badge.danger {
   background: rgba(176, 70, 52, 0.14);
   color: var(--danger);
+}
+
+.profile-badge {
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
 }
 
 .error-banner,

@@ -69,3 +69,24 @@ class CrawlJobSummaryResponse(BaseModel):
     saved_count: int
     skipped_count: int
     failed_count: int
+
+
+class RuntimeSystemProfile(BaseModel):
+    logical_cores: int
+    physical_cores: int
+    memory_gb: float | None = None
+
+
+class RuntimeTuningProfile(BaseModel):
+    crawler_processes: int
+    crawler_concurrency_per_process: int
+    crawler_host_concurrency: int
+    report_worker_threads: int
+
+
+class RuntimeProfileResponse(BaseModel):
+    system: RuntimeSystemProfile
+    recommended: RuntimeTuningProfile
+    configured: RuntimeTuningProfile
+    effective: RuntimeTuningProfile
+    explicit: dict[str, bool]

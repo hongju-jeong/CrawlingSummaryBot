@@ -10,6 +10,7 @@ const isLoadingIssues = ref(false);
 const isLoadingPreview = ref(false);
 const isCrawling = ref(false);
 const errorMessage = ref("");
+const runtimeProfile = ref(null);
 const monitoringSummary = ref({
   processCount: 0,
   sourceGroups: [],
@@ -28,6 +29,18 @@ const selectedIssue = computed(() => {
 
 const selectedIssueBody = computed(() => {
   return selectedIssueDetail.value?.raw_content ?? "";
+});
+
+const recommendedProfileText = computed(() => {
+  if (!runtimeProfile.value) return "";
+  const profile = runtimeProfile.value.recommended;
+  return `프로세스 ${profile.crawler_processes} · 프로세스당 동시성 ${profile.crawler_concurrency_per_process} · 호스트당 ${profile.crawler_host_concurrency} · 후처리 워커 ${profile.report_worker_threads}`;
+});
+
+const effectiveProfileText = computed(() => {
+  if (!runtimeProfile.value) return "";
+  const profile = runtimeProfile.value.effective;
+  return `프로세스 ${profile.crawler_processes} · 프로세스당 동시성 ${profile.crawler_concurrency_per_process} · 호스트당 ${profile.crawler_host_concurrency} · 후처리 워커 ${profile.report_worker_threads}`;
 });
 
 async function requestJson(url, options = {}) {
@@ -100,6 +113,14 @@ async function loadLogs() {
   try {
     const payload = await requestJson("/api/delivery-logs");
     logs.value = payload.items ?? [];
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function loadRuntimeProfile() {
+  try {
+    runtimeProfile.value = await requestJson("/api/runtime-profile");
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -287,6 +308,7 @@ watch(selectedIssueId, (issueId) => {
 });
 
 onMounted(async () => {
+  await loadRuntimeProfile();
   await loadIssues();
   await loadLogs();
 });
@@ -301,6 +323,22 @@ onMounted(async () => {
         <p class="hero-copy">
           수집 버튼을 누르면 크롤링 프로세스 수, 기사별 AI 요약, Slack 전송 단계를 실시간으로 추적합니다.
         </p>
+        <div v-if="runtimeProfile" class="runtime-strip">
+          <span class="badge subtle">
+            시스템
+            {{ runtimeProfile.system.physical_cores }}C /
+            {{ runtimeProfile.system.logical_cores }}T
+            <template v-if="runtimeProfile.system.memory_gb">
+              · {{ runtimeProfile.system.memory_gb }}GB RAM
+            </template>
+          </span>
+          <span class="badge subtle profile-badge">
+            추천 · {{ recommendedProfileText }}
+          </span>
+          <span class="badge active profile-badge">
+            적용 · {{ effectiveProfileText }}
+          </span>
+        </div>
       </div>
       <div class="hero-actions">
         <button class="action-button" :disabled="isCrawling" @click="crawlLatestNews">

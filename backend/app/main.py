@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import json
+import queue
+import threading
 
 import httpx
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
@@ -18,10 +20,12 @@ from .schemas import (
     IssueListResponse,
     LatestNewsCrawlRequest,
     ReportPreviewResponse,
+    RuntimeProfileResponse,
 )
 from .services.issue_ingestion import save_crawled_articles
 from .services.multi_source_crawler import MultiSourcePollingCrawler
 from .services.naver_latest_crawler import NaverLatestNewsCrawler
+from .services.runtime_profile import get_effective_crawler_processes, get_runtime_profile
 from .services.scheduler import start_scheduler, stop_scheduler
 
 
@@ -52,6 +56,11 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.get(f"{settings.api_prefix}/runtime-profile", response_model=RuntimeProfileResponse)
+def read_runtime_profile() -> RuntimeProfileResponse:
+    return RuntimeProfileResponse(**get_runtime_profile())
 
 
 @app.post(
@@ -88,7 +97,7 @@ def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_
     def event_stream():
         groups = [group for group in settings.crawler_enabled_source_groups if group != "x-experimental" or settings.x_experimental_enabled]
         active_groups = [group for group in groups if group in settings.crawler_enabled_source_groups]
-        process_count = min(settings.crawler_processes, len(active_groups)) if active_groups else 0
+        process_count = min(get_effective_crawler_processes(), len(active_groups)) if active_groups else 0
         yield to_ndjson(
             {
                 "type": "run_started",
@@ -113,37 +122,36 @@ def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_
             }
         )
 
-        db = SessionLocal()
-        totals = {
-            "saved_count": 0,
-            "skipped_count": 0,
-            "failed_count": 0,
-        }
-        try:
-            for article in articles:
-                buffered_events: list[dict] = []
+        event_queue: queue.Queue[dict | None] = queue.Queue()
 
-                def on_event(event_type: str, payload: dict) -> None:
-                    buffered_events.append({"type": event_type, **payload})
+        def on_event(event_type: str, payload: dict) -> None:
+            event_queue.put({"type": event_type, **payload})
 
-                result = save_crawled_articles(db, [article], event_callback=on_event)
-                totals["saved_count"] += result.saved_count
-                totals["skipped_count"] += result.skipped_count
-                totals["failed_count"] += result.failed_count
-                for event in buffered_events:
-                    yield to_ndjson(event)
+        def ingest_worker() -> None:
+            db = SessionLocal()
+            try:
+                result = save_crawled_articles(db, articles, event_callback=on_event)
+                event_queue.put(
+                    {
+                        "type": "run_completed",
+                        "collected_count": len(articles),
+                        "saved_count": result.saved_count,
+                        "skipped_count": result.skipped_count,
+                        "failed_count": result.failed_count,
+                    }
+                )
+            except Exception as error:
+                event_queue.put({"type": "run_failed", "error": str(error)})
+            finally:
+                db.close()
+                event_queue.put(None)
 
-            yield to_ndjson(
-                {
-                    "type": "run_completed",
-                    "collected_count": len(articles),
-                    "saved_count": totals["saved_count"],
-                    "skipped_count": totals["skipped_count"],
-                    "failed_count": totals["failed_count"],
-                }
-            )
-        finally:
-            db.close()
+        threading.Thread(target=ingest_worker, name="crawl-stream-ingest", daemon=True).start()
+        while True:
+            event = event_queue.get()
+            if event is None:
+                break
+            yield to_ndjson(event)
 
     return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 

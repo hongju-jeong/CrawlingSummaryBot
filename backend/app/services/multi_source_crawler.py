@@ -7,6 +7,10 @@ import httpx
 from ..config import settings
 from .gnews_api_crawler import GNewsAPICrawler
 from .html_source_crawler import HTMLSourceCrawler
+from .runtime_profile import (
+    get_effective_crawler_concurrency_per_process,
+    get_effective_crawler_processes,
+)
 from .source_registry import SourceDefinition, get_source_definitions
 from .source_types import CrawledArticle, TOPIC_PRIORITY
 from .x_experimental_crawler import XExperimentalCrawler
@@ -18,7 +22,7 @@ class MultiSourcePollingCrawler:
         if not groups:
             return []
 
-        max_workers = min(settings.crawler_processes, len(groups))
+        max_workers = min(get_effective_crawler_processes(), len(groups))
         if max_workers <= 1:
             articles = asyncio.run(_crawl_group_async(groups[0], limit_per_source))
             return _prioritize_articles(articles)
@@ -44,7 +48,7 @@ async def _crawl_group_async(group: str, limit_per_source: int) -> list[CrawledA
         return []
 
     headers = {"User-Agent": settings.crawler_user_agent}
-    limits = httpx.Limits(max_connections=settings.crawler_concurrency_per_process)
+    limits = httpx.Limits(max_connections=get_effective_crawler_concurrency_per_process())
     host_limiters: dict[str, asyncio.Semaphore] = {}
     async with httpx.AsyncClient(headers=headers, timeout=settings.crawler_timeout_seconds, limits=limits) as client:
         tasks = [

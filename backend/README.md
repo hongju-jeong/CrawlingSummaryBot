@@ -40,6 +40,7 @@ APP_CRAWLER_INTERVAL_MINUTES=10
 APP_CRAWLER_PROCESSES=4
 APP_CRAWLER_CONCURRENCY_PER_PROCESS=8
 APP_CRAWLER_HOST_CONCURRENCY=2
+APP_REPORT_WORKER_THREADS=4
 APP_GNEWS_API_KEY=
 APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
 APP_SLACK_AUTO_SEND=true
@@ -54,6 +55,7 @@ APP_X_ACCOUNTS=[]
 - 기본값은 로컬 실행 편의를 위해 SQLite를 사용하지만 `APP_DATABASE_URL`로 PostgreSQL을 바로 연결할 수 있습니다.
 - 다중 소스 수집기는 네이버, 다음, 연합뉴스, KBS, Reuters, BBC, AP, GNews API를 대상으로 동작합니다.
 - `POST /api/crawl/latest`는 멀티프로세스 기반으로 소스 그룹을 병렬 수집합니다.
+- 기사 저장과 중복 체크는 순차로 처리하고, AI 요약과 Slack 전송은 `APP_REPORT_WORKER_THREADS` 기준 멀티스레드 worker로 병렬 처리합니다.
 - `issues.category`는 주제(`정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`)로 사용됩니다.
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
 - `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 요약 결과를 저장합니다.
