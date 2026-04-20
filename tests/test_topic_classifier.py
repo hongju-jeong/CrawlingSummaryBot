@@ -13,6 +13,16 @@ def test_classify_topic_prefers_economy_keywords():
     assert confidence >= 0.6
 
 
+def test_classify_topic_routes_sports_to_entertainment():
+    topic, confidence = classify_topic(
+        title="손흥민 멀티골, 토트넘 3대1 승리",
+        raw_content="손흥민이 후반 멀티골을 기록하며 팀 승리를 이끌었다. 감독은 경기 후 선수단의 집중력을 높이 평가했다.",
+        source_name="스포츠서울",
+    )
+    assert topic == "연예"
+    assert confidence >= 0.6
+
+
 def test_html_source_crawler_extracts_article_links():
     source = SourceDefinition(
         name="Test News",

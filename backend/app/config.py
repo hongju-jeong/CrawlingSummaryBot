@@ -1,4 +1,10 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import ast
+import json
+from pathlib import Path
+from typing import Annotated, Any
+
+from pydantic import ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -26,6 +32,8 @@ class Settings(BaseSettings):
     default_report_channel: str = "Slack"
     default_report_destination: str = "#exec-briefing"
     slack_webhook_url: str | None = None
+    topic_webhooks: Annotated[dict[str, str], NoDecode] = {}
+    topic_channels: Annotated[dict[str, str], NoDecode] = {}
     slack_auto_send: bool = True
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
@@ -41,6 +49,55 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @field_validator("topic_webhooks", "topic_channels", mode="before")
+    @classmethod
+    def parse_mapping(cls, value: Any, info: ValidationInfo) -> dict[str, str]:
+        if value in (None, "", {}):
+            return {}
+        if isinstance(value, dict):
+            return {str(key): str(item) for key, item in value.items()}
+        if isinstance(value, str):
+            if value.strip() == "{":
+                key = f"{cls.model_config.get('env_prefix', '')}{info.field_name.upper()}"
+                value = cls._read_multiline_mapping_from_env_file(key) or value
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(value)
+                except (ValueError, SyntaxError, json.JSONDecodeError):
+                    continue
+                if isinstance(parsed, dict):
+                    return {str(key): str(item) for key, item in parsed.items()}
+        raise ValueError("Expected a JSON or Python-style mapping string.")
+
+    @classmethod
+    def _read_multiline_mapping_from_env_file(cls, env_key: str) -> str | None:
+        env_file = cls.model_config.get("env_file")
+        if not env_file:
+            return None
+        path = Path(env_file)
+        if not path.exists():
+            return None
+
+        lines = path.read_text(encoding="utf-8").splitlines()
+        prefix = f"{env_key}="
+        for index, line in enumerate(lines):
+            if not line.startswith(prefix):
+                continue
+            value = line.split("=", 1)[1].strip()
+            if not value.startswith("{"):
+                return value
+
+            collected = [value]
+            balance = value.count("{") - value.count("}")
+            cursor = index + 1
+            while balance > 0 and cursor < len(lines):
+                next_line = lines[cursor].strip()
+                collected.append(next_line)
+                balance += next_line.count("{") - next_line.count("}")
+                cursor += 1
+            return "\n".join(collected)
+        return None
 
 
 settings = Settings()

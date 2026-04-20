@@ -1,7 +1,9 @@
 from backend.app.api.routes.delivery_logs import read_delivery_logs
 from backend.app.api.routes.issues import read_issue_detail, read_issue_preview, read_issues
+from backend.app.config import settings
 from backend.app.database import Base, SessionLocal, engine
 from backend.app.models import DeliveryLog, Issue, IssueSummary, Report, ReportChannel, Source
+from backend.app.repository import get_destination_for_topic
 from backend.app.schemas import DeliveryLogListResponse, IssueDetailResponse, IssueListResponse, ReportPreviewResponse
 
 
@@ -106,3 +108,13 @@ def test_issue_endpoints_return_db_data():
         assert logs_response.items[0].status == "대기"
     finally:
         db.close()
+
+
+def test_topic_destination_prefers_configured_mapping():
+    original_channels = dict(settings.topic_channels)
+    try:
+        settings.topic_channels = {"정치": "#custom-politics"}
+        assert get_destination_for_topic("정치") == "#custom-politics"
+        assert get_destination_for_topic("없는주제") == settings.default_report_destination
+    finally:
+        settings.topic_channels = original_channels

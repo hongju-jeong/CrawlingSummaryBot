@@ -6,6 +6,16 @@ from sqlalchemy.orm import Session, joinedload
 from .config import settings
 from .models import DeliveryLog, Issue, Report, ReportChannel, Source
 
+DEFAULT_TOPIC_DESTINATIONS = {
+    "정치": "#news-politics",
+    "경제": "#news-economy",
+    "국제": "#news-global",
+    "산업/기업": "#news-business",
+    "기술/AI": "#news-tech",
+    "사회": "#news-society",
+    "연예": "#news-entertainment",
+}
+
 
 def list_issues(db: Session) -> list[dict]:
     issues = db.scalars(
@@ -134,6 +144,35 @@ def get_or_create_default_channel(db: Session) -> ReportChannel:
     db.add(channel)
     db.flush()
     return channel
+
+
+def get_or_create_channel_for_topic(db: Session, topic: str) -> ReportChannel:
+    destination = get_destination_for_topic(topic)
+    name = destination if destination != settings.default_report_destination else settings.default_report_channel
+
+    channel = db.scalar(select(ReportChannel).where(ReportChannel.name == name))
+    if channel is not None:
+        channel.destination = destination
+        channel.channel_type = "slack"
+        return channel
+
+    channel = ReportChannel(
+        name=name,
+        channel_type="slack",
+        destination=destination,
+        is_active=True,
+    )
+    db.add(channel)
+    db.flush()
+    return channel
+
+
+def get_destination_for_topic(topic: str) -> str:
+    return (
+        settings.topic_channels.get(topic)
+        or DEFAULT_TOPIC_DESTINATIONS.get(topic)
+        or settings.default_report_destination
+    )
 
 
 def normalize_preview_text(content: str | None, max_length: int = 220) -> str:

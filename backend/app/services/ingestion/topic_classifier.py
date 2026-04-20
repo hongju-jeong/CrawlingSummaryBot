@@ -115,6 +115,21 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
     TOPIC_ENTERTAINMENT: (
         "연예",
+        "스포츠",
+        "축구",
+        "야구",
+        "농구",
+        "배구",
+        "골프",
+        "테니스",
+        "올림픽",
+        "월드컵",
+        "프로야구",
+        "프로축구",
+        "선수",
+        "감독",
+        "우승",
+        "경기",
         "가수",
         "배우",
         "드라마",
@@ -122,6 +137,19 @@ TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
         "아이돌",
         "공연",
         "넷플릭스",
+        "sports",
+        "football",
+        "baseball",
+        "basketball",
+        "volleyball",
+        "golf",
+        "tennis",
+        "olympics",
+        "world cup",
+        "player",
+        "coach",
+        "match",
+        "tournament",
         "music",
         "actor",
         "drama",
@@ -165,7 +193,7 @@ def classify_topic_with_llm(*, title: str, raw_content: str, source_name: str) -
         instructions=(
             "Classify the input into exactly one topic from this set: "
             + ", ".join(TOPICS)
-            + "."
+            + ". Treat sports news as part of the 연예 category."
         ),
         input=[
             {

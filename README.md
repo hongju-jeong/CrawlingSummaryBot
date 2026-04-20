@@ -117,6 +117,8 @@ APP_CRAWLER_HOST_CONCURRENCY=2
 APP_REPORT_WORKER_THREADS=4
 APP_GNEWS_API_KEY=
 APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+APP_TOPIC_WEBHOOKS={"정치":"https://hooks.slack.com/services/your/politics/webhook","경제":"https://hooks.slack.com/services/your/economy/webhook","국제":"https://hooks.slack.com/services/your/global/webhook","산업/기업":"https://hooks.slack.com/services/your/business/webhook","기술/AI":"https://hooks.slack.com/services/your/tech/webhook","사회":"https://hooks.slack.com/services/your/society/webhook","연예":"https://hooks.slack.com/services/your/entertainment/webhook"}
+APP_TOPIC_CHANNELS={"정치":"#news-politics","경제":"#news-economy","국제":"#news-global","산업/기업":"#news-business","기술/AI":"#news-tech","사회":"#news-society","연예":"#news-entertainment"}
 APP_SLACK_AUTO_SEND=true
 APP_OPENAI_API_KEY=your_openai_api_key
 APP_OPENAI_MODEL=gpt-5.4-mini
@@ -134,4 +136,5 @@ APP_X_ACCOUNTS=[]
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
 - `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 요약 결과를 저장합니다.
 - `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 `[주제] AI 요약` 형식으로 Slack으로 자동 전송합니다.
+- `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_X_EXPERIMENTAL_ENABLED=true`이고 `twscrape` 계정 설정이 준비되면 X 실험 모듈이 별도 그룹으로 동작합니다.

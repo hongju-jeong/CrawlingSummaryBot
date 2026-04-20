@@ -15,7 +15,7 @@ class SlackSendResult:
 
 class SlackReporter:
     def __init__(self) -> None:
-        self.webhook_url = settings.slack_webhook_url
+        self.default_webhook_url = settings.slack_webhook_url
         self.timeout = settings.crawler_timeout_seconds
 
     def send_summary(
@@ -26,12 +26,13 @@ class SlackReporter:
         source_name: str,
         article_url: str | None,
     ) -> SlackSendResult:
-        if not self.webhook_url:
+        webhook_url = self._resolve_webhook_url(topic)
+        if not webhook_url:
             return SlackSendResult(
                 success=False,
                 status_code=None,
                 response_body=None,
-                error_message="Slack webhook URL is not configured.",
+                error_message=f"Slack webhook URL is not configured for topic '{topic}'.",
             )
 
         try:
@@ -43,7 +44,7 @@ class SlackReporter:
                 lines.append(f"링크: {article_url}")
             message = "\n".join(lines)
             with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(self.webhook_url, json={"text": message})
+                response = client.post(webhook_url, json={"text": message})
                 ok = response.status_code >= 200 and response.status_code < 300
                 return SlackSendResult(
                     success=ok,
@@ -58,3 +59,6 @@ class SlackReporter:
                 response_body=None,
                 error_message=str(error),
             )
+
+    def _resolve_webhook_url(self, topic: str) -> str | None:
+        return settings.topic_webhooks.get(topic) or self.default_webhook_url
