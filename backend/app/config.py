@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     crawler_concurrency_per_process: int = 8
     crawler_host_concurrency: int = 2
     crawler_retry_count: int = 2
+    crawler_respect_robots: bool = True
+    crawler_robots_cache_ttl_seconds: int = 3600
+    crawler_robots_user_agent: str = "*"
     report_worker_threads: int = 4
     crawler_user_agent: str = (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

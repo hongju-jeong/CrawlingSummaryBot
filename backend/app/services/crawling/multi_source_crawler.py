@@ -7,6 +7,7 @@ import httpx
 from ...config import settings
 from .gnews_api_crawler import GNewsAPICrawler
 from .html_source_crawler import HTMLSourceCrawler
+from .robots_policy import RobotsPolicyCache
 from ..runtime.runtime_profile import (
     get_effective_crawler_concurrency_per_process,
     get_effective_crawler_processes,
@@ -50,6 +51,7 @@ async def _crawl_group_async(group: str, limit_per_source: int) -> list[CrawledA
     headers = {"User-Agent": settings.crawler_user_agent}
     limits = httpx.Limits(max_connections=get_effective_crawler_concurrency_per_process())
     host_limiters: dict[str, asyncio.Semaphore] = {}
+    robots_cache = RobotsPolicyCache()
     async with httpx.AsyncClient(headers=headers, timeout=settings.crawler_timeout_seconds, limits=limits) as client:
         tasks = [
             _crawl_source(
@@ -57,6 +59,7 @@ async def _crawl_group_async(group: str, limit_per_source: int) -> list[CrawledA
                 client=client,
                 limit_per_source=limit_per_source,
                 host_limiters=host_limiters,
+                robots_cache=robots_cache,
             )
             for definition in source_definitions
         ]
@@ -75,6 +78,7 @@ async def _crawl_source(
     client: httpx.AsyncClient,
     limit_per_source: int,
     host_limiters: dict[str, asyncio.Semaphore],
+    robots_cache: RobotsPolicyCache,
 ) -> list[CrawledArticle]:
     if source.source_type == "html":
         return await HTMLSourceCrawler().crawl_source(
@@ -82,6 +86,7 @@ async def _crawl_source(
             limit=limit_per_source,
             client=client,
             host_limiters=host_limiters,
+            robots_cache=robots_cache,
         )
     if source.source_type == "api":
         return await GNewsAPICrawler().crawl_source(source, limit=limit_per_source, client=client)

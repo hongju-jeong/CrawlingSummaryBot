@@ -116,6 +116,9 @@ APP_CRAWLER_MAX_ITEMS_PER_RUN=20
 APP_CRAWLER_LIMIT_PER_SOURCE=5
 APP_CRAWLER_SCHEDULE_ENABLED=true
 APP_CRAWLER_INTERVAL_MINUTES=10
+APP_CRAWLER_RESPECT_ROBOTS=true
+APP_CRAWLER_ROBOTS_CACHE_TTL_SECONDS=3600
+APP_CRAWLER_ROBOTS_USER_AGENT=*
 APP_CRAWLER_PROCESSES=4
 APP_CRAWLER_CONCURRENCY_PER_PROCESS=8
 APP_CRAWLER_HOST_CONCURRENCY=2
@@ -136,6 +139,7 @@ APP_X_ACCOUNTS=[]
 - 기본값은 로컬 실행 편의를 위해 SQLite를 사용하지만 `APP_DATABASE_URL`로 PostgreSQL을 바로 연결할 수 있습니다.
 - 다중 소스 수집기는 네이버, 다음, 연합뉴스, KBS, Reuters, BBC, AP, GNews API를 대상으로 동작합니다.
 - `POST /api/crawl/latest`는 멀티프로세스 기반으로 소스 그룹을 병렬 수집합니다.
+- HTML 기반 크롤러는 기본적으로 `robots.txt`를 조회하고 `Allow/Disallow` 및 `crawl-delay`를 존중합니다.
 - 기사 저장과 중복 체크는 순차로 처리하고, 후처리(OpenAI/Slack)는 `APP_REPORT_WORKER_THREADS` 기준 멀티스레드 worker로 병렬 처리합니다.
 - `issues.category`는 주제(`정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`)로 사용됩니다.
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.

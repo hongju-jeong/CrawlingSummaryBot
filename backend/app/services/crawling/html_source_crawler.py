@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 
 from ...config import settings
 from ..runtime.runtime_profile import get_effective_crawler_host_concurrency
+from .robots_policy import RobotsPolicyCache
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle
 
@@ -26,14 +27,28 @@ class HTMLSourceCrawler:
         limit: int,
         client: httpx.AsyncClient,
         host_limiters: dict[str, asyncio.Semaphore],
+        robots_cache: RobotsPolicyCache | None = None,
     ) -> list[CrawledArticle]:
-        html = await self._fetch_text(client, source.start_url, host_limiters)
+        if robots_cache and not await robots_cache.can_fetch(
+            source.start_url,
+            client=client,
+            host_limiters=host_limiters,
+        ):
+            return []
+
+        html = await self._fetch_text(client, source.start_url, host_limiters, robots_cache=robots_cache)
         if not html:
             return []
 
         links = self._extract_article_links(source, html, limit=limit)
         tasks = [
-            self._fetch_article(source, article_url=article_url, client=client, host_limiters=host_limiters)
+            self._fetch_article(
+                source,
+                article_url=article_url,
+                client=client,
+                host_limiters=host_limiters,
+                robots_cache=robots_cache,
+            )
             for article_url in links
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -50,8 +65,16 @@ class HTMLSourceCrawler:
         article_url: str,
         client: httpx.AsyncClient,
         host_limiters: dict[str, asyncio.Semaphore],
+        robots_cache: RobotsPolicyCache | None = None,
     ) -> CrawledArticle | None:
-        html = await self._fetch_text(client, article_url, host_limiters)
+        if robots_cache and not await robots_cache.can_fetch(
+            article_url,
+            client=client,
+            host_limiters=host_limiters,
+        ):
+            return None
+
+        html = await self._fetch_text(client, article_url, host_limiters, robots_cache=robots_cache)
         if not html:
             return None
 
@@ -82,11 +105,18 @@ class HTMLSourceCrawler:
         client: httpx.AsyncClient,
         url: str,
         host_limiters: dict[str, asyncio.Semaphore],
+        robots_cache: RobotsPolicyCache | None = None,
     ) -> str:
         host = urlparse(url).netloc
         limiter = host_limiters.setdefault(host, asyncio.Semaphore(get_effective_crawler_host_concurrency()))
         for attempt in range(settings.crawler_retry_count + 1):
             try:
+                if robots_cache:
+                    await robots_cache.wait_for_slot(
+                        url,
+                        client=client,
+                        host_limiters=host_limiters,
+                    )
                 async with limiter:
                     response = await client.get(url, headers=self.headers, timeout=self.timeout, follow_redirects=True)
                 response.raise_for_status()
