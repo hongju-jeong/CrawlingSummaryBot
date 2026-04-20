@@ -1,10 +1,23 @@
+import json
+from datetime import date
+
+from sqlalchemy import select
+
+from backend.app.api.routes.daily_summaries import read_latest_daily_summary
+from backend.app.api.routes.daily_summaries import run_daily_summary
 from backend.app.api.routes.delivery_logs import read_delivery_logs
 from backend.app.api.routes.issues import read_issue_detail, read_issue_preview, read_issues
 from backend.app.config import settings
 from backend.app.database import Base, SessionLocal, engine
-from backend.app.models import DeliveryLog, Issue, IssueSummary, Report, ReportChannel, Source
+from backend.app.models import DailySummary, DeliveryLog, Issue, IssueSummary, Report, ReportChannel, Source
 from backend.app.repository import get_destination_for_topic
-from backend.app.schemas import DeliveryLogListResponse, IssueDetailResponse, IssueListResponse, ReportPreviewResponse
+from backend.app.schemas import (
+    DailySummaryLatestResponse,
+    DeliveryLogListResponse,
+    IssueDetailResponse,
+    IssueListResponse,
+    ReportPreviewResponse,
+)
 
 
 def reset_db() -> None:
@@ -40,6 +53,10 @@ def seed_issue() -> int:
             llm_model="preview-truncation",
             prompt_version="v1",
             summary_text="테스트 본문입니다. 자동 보고 미리보기에서 요약으로 사용됩니다.",
+            importance="높음",
+            key_points_json=json.dumps(["핵심1", "핵심2"], ensure_ascii=False),
+            research_value="추적 가치가 높은 기사입니다.",
+            tracking_keywords_json=json.dumps(["문화일보", "테스트"], ensure_ascii=False),
             summary_status="completed",
         )
         db.add(summary)
@@ -92,6 +109,10 @@ def test_issue_endpoints_return_db_data():
         assert "테스트 본문" in preview_response.summary
         assert "출처: 문화일보" in preview_response.preview_message
         assert "링크: https://n.news.naver.com/article/021/0002785289" in preview_response.preview_message
+        assert preview_response.importance == "높음"
+        assert preview_response.key_points == ["핵심1", "핵심2"]
+        assert preview_response.research_value == "추적 가치가 높은 기사입니다."
+        assert preview_response.tracking_keywords == ["문화일보", "테스트"]
 
         detail_response = read_issue_detail(issue_id, db)
         assert isinstance(detail_response, IssueDetailResponse)
@@ -118,3 +139,60 @@ def test_topic_destination_prefers_configured_mapping():
         assert get_destination_for_topic("없는주제") == settings.default_report_destination
     finally:
         settings.topic_channels = original_channels
+
+
+def test_latest_daily_summary_endpoint_returns_payload():
+    reset_db()
+    issue_id = seed_issue()
+
+    db = SessionLocal()
+    try:
+        channel = db.scalar(select(ReportChannel).where(ReportChannel.name == "Slack"))
+        daily_summary = DailySummary(
+            summary_date="2026-04-19",
+            channel_id=channel.id,
+            status="sent",
+            message_text="2026-04-19 일자 키워드 요약",
+            payload_json=json.dumps(
+                {
+                    "summary_date": "2026-04-19",
+                    "topics": [{"topic": "정치", "keywords": [{"keyword": "대통령", "description": "..."}]}],
+                },
+                ensure_ascii=False,
+            ),
+        )
+        db.add(daily_summary)
+        db.commit()
+
+        response = read_latest_daily_summary(db)
+        assert isinstance(response, DailySummaryLatestResponse)
+        assert response.summary_date == "2026-04-19"
+        assert response.status == "sent"
+        assert response.payload["topics"][0]["topic"] == "정치"
+    finally:
+        db.close()
+
+
+def test_run_daily_summary_endpoint_creates_summary_for_date():
+    reset_db()
+    seed_issue()
+
+    original_enabled = settings.daily_summary_enabled
+    original_webhook = settings.daily_summary_webhook_url
+    try:
+        settings.daily_summary_enabled = True
+        settings.daily_summary_webhook_url = None
+
+        db = SessionLocal()
+        try:
+            response = run_daily_summary(summary_date=date(2026, 4, 19), db=db)
+            assert isinstance(response, DailySummaryLatestResponse)
+            assert response.summary_date == "2026-04-19"
+            assert response.status == "failed"
+            assert "2026-04-19 일자 키워드 요약" in response.message_text
+            assert response.payload["summary_date"] == "2026-04-19"
+        finally:
+            db.close()
+    finally:
+        settings.daily_summary_enabled = original_enabled
+        settings.daily_summary_webhook_url = original_webhook

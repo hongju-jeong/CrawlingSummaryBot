@@ -1,8 +1,10 @@
 from datetime import datetime
+from typing import Any
 
 import httpx
 
 from ...config import settings
+from ..runtime.crawl_control import is_cancelled
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle
 
@@ -14,8 +16,9 @@ class GNewsAPICrawler:
         *,
         limit: int,
         client: httpx.AsyncClient,
+        cancel_token: Any | None = None,
     ) -> list[CrawledArticle]:
-        if not settings.gnews_api_key:
+        if not settings.gnews_api_key or is_cancelled(cancel_token):
             return []
 
         response = await client.get(
@@ -32,6 +35,8 @@ class GNewsAPICrawler:
         payload = response.json()
         articles: list[CrawledArticle] = []
         for item in payload.get("articles", []):
+            if is_cancelled(cancel_token):
+                break
             title = (item.get("title") or "").strip()
             article_url = (item.get("url") or "").strip()
             raw_content = (item.get("content") or item.get("description") or "").strip()

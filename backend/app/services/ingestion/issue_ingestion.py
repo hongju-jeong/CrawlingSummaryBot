@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue
+import threading
 from typing import Callable
+import json
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -12,8 +15,9 @@ from ...database import SessionLocal
 from ...models import DeliveryLog, Issue, IssueSummary, Report
 from ...repository import get_or_create_channel_for_topic, get_or_create_source, normalize_preview_text
 from ..reporting.openai_summary import OpenAISummaryService
+from ..runtime.crawl_control import is_cancelled
 from ..runtime.runtime_profile import get_effective_report_worker_threads
-from ..reporting.slack_reporter import SlackReporter
+from ..reporting.slack_reporter import SlackReporter, format_article_message
 from ..crawling.source_types import CrawledArticle
 from .topic_classifier import classify_topic
 
@@ -34,6 +38,7 @@ def save_crawled_articles(
     articles: list[CrawledArticle],
     *,
     event_callback: EventCallback | None = None,
+    cancel_token: Any | None = None,
 ) -> IngestionResult:
     saved_count = 0
     skipped_count = 0
@@ -41,6 +46,8 @@ def save_crawled_articles(
     post_process_jobs: list[tuple[int, bool]] = []
 
     for article in articles:
+        if is_cancelled(cancel_token):
+            break
         try:
             emit_event(
                 event_callback,
@@ -134,7 +141,7 @@ def save_crawled_articles(
             )
 
     db.commit()
-    _run_post_process_jobs(post_process_jobs, event_callback=event_callback)
+    _run_post_process_jobs(post_process_jobs, event_callback=event_callback, cancel_token=cancel_token)
     return IngestionResult(
         collected_count=len(articles),
         saved_count=saved_count,
@@ -147,6 +154,7 @@ def _run_post_process_jobs(
     jobs: list[tuple[int, bool]],
     *,
     event_callback: EventCallback | None = None,
+    cancel_token: Any | None = None,
 ) -> None:
     if not jobs:
         return
@@ -154,25 +162,55 @@ def _run_post_process_jobs(
     max_workers = min(get_effective_report_worker_threads(), len(jobs))
     if max_workers <= 1:
         for issue_id, should_send in jobs:
-            _process_reporting_job(issue_id, should_send, event_callback)
+            if is_cancelled(cancel_token):
+                break
+            _process_reporting_job(issue_id, should_send, event_callback, cancel_token=cancel_token)
         return
 
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="report-worker") as executor:
-        futures = [
-            executor.submit(_process_reporting_job, issue_id, should_send, event_callback)
-            for issue_id, should_send in jobs
-        ]
-        for future in as_completed(futures):
-            future.result()
+    work_queue: queue.Queue[tuple[int, bool] | None] = queue.Queue()
+    for job in jobs:
+        work_queue.put(job)
+    for _ in range(max_workers):
+        work_queue.put(None)
+
+    threads = [
+        threading.Thread(
+            target=_reporting_worker,
+            args=(work_queue, event_callback, cancel_token),
+            name=f"report-worker-{index}",
+            daemon=True,
+        )
+        for index in range(max_workers)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def _reporting_worker(
+    work_queue: queue.Queue[tuple[int, bool] | None],
+    event_callback: EventCallback | None,
+    cancel_token: Any | None,
+) -> None:
+    while not is_cancelled(cancel_token):
+        job = work_queue.get()
+        if job is None:
+            break
+        issue_id, should_send = job
+        _process_reporting_job(issue_id, should_send, event_callback, cancel_token=cancel_token)
 
 
 def _process_reporting_job(
     issue_id: int,
     should_send: bool,
     event_callback: EventCallback | None = None,
+    cancel_token: Any | None = None,
 ) -> None:
     db = SessionLocal()
     try:
+        if is_cancelled(cancel_token):
+            return
         issue = db.scalar(
             select(Issue)
             .options(joinedload(Issue.source))
@@ -180,7 +218,13 @@ def _process_reporting_job(
         )
         if issue is None:
             return
-        update_reporting_state(db, issue, should_send=should_send, event_callback=event_callback)
+        update_reporting_state(
+            db,
+            issue,
+            should_send=should_send,
+            event_callback=event_callback,
+            cancel_token=cancel_token,
+        )
         db.commit()
     except Exception as error:
         db.rollback()
@@ -219,8 +263,22 @@ def update_reporting_state(
     *,
     should_send: bool,
     event_callback: EventCallback | None = None,
+    cancel_token: Any | None = None,
 ) -> None:
-    topic, summary_text, llm_provider, llm_model, summary_status = build_summary(
+    if is_cancelled(cancel_token):
+        issue.status = "summarized"
+        return
+    (
+        topic,
+        summary_text,
+        importance,
+        key_points,
+        research_value,
+        tracking_keywords,
+        llm_provider,
+        llm_model,
+        summary_status,
+    ) = build_summary(
         title=issue.title,
         press_name=issue.press_name or "",
         raw_content=issue.raw_content or "",
@@ -239,6 +297,10 @@ def update_reporting_state(
             llm_model=llm_model,
             prompt_version="v1",
             summary_text=summary_text,
+            importance=importance,
+            key_points_json=json.dumps(key_points, ensure_ascii=False),
+            research_value=research_value,
+            tracking_keywords_json=json.dumps(tracking_keywords, ensure_ascii=False),
             summary_status=summary_status,
         )
         db.add(summary)
@@ -247,6 +309,10 @@ def update_reporting_state(
         summary.llm_provider = llm_provider
         summary.llm_model = llm_model
         summary.summary_text = summary_text
+        summary.importance = importance
+        summary.key_points_json = json.dumps(key_points, ensure_ascii=False)
+        summary.research_value = research_value
+        summary.tracking_keywords_json = json.dumps(tracking_keywords, ensure_ascii=False)
         summary.summary_status = summary_status
 
     emit_event(
@@ -258,16 +324,20 @@ def update_reporting_state(
             "source": issue.press_name or issue.source.name if issue.source else issue.press_name or "출처 미상",
             "category": issue.category,
             "summary": summary_text,
+            "importance": importance,
         },
     )
 
-    preview_lines = [
-        f"[{issue.category}] {summary_text}",
-        f"출처: {issue.press_name or issue.source.name if issue.source else issue.press_name or '출처 미상'}",
-    ]
-    if issue.original_url:
-        preview_lines.append(f"링크: {issue.original_url}")
-    preview_message = "\n".join(preview_lines)
+    preview_message = format_article_message(
+        topic=issue.category,
+        summary_text=summary_text,
+        importance=importance,
+        key_points=key_points,
+        research_value=research_value,
+        tracking_keywords=tracking_keywords,
+        source_name=issue.press_name or issue.source.name if issue.source else issue.press_name or "출처 미상",
+        article_url=issue.original_url,
+    )
     report = db.scalar(select(Report).where(Report.issue_id == issue.id).order_by(Report.created_at.desc()))
     if report is None:
         report = Report(
@@ -324,6 +394,21 @@ def update_reporting_state(
             },
         )
         return
+    if is_cancelled(cancel_token):
+        delivery_log.delivery_status = "cancelled"
+        report.report_status = "cancelled"
+        issue.status = "cancelled"
+        emit_event(
+            event_callback,
+            "run_cancelled",
+            {
+                "issue_id": issue.id,
+                "title": issue.title,
+                "category": issue.category,
+                "status": issue.status,
+            },
+        )
+        return
 
     emit_event(
         event_callback,
@@ -338,6 +423,10 @@ def update_reporting_state(
     send_result = SlackReporter().send_summary(
         summary_text,
         topic=issue.category,
+        importance=importance,
+        key_points=key_points,
+        research_value=research_value,
+        tracking_keywords=tracking_keywords,
         source_name=issue.press_name or issue.source.name if issue.source else issue.press_name or "출처 미상",
         article_url=issue.original_url,
     )
@@ -385,11 +474,11 @@ def build_summary(
     raw_content: str,
     source_name: str,
     provisional_topic: str,
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, list[str], str, list[str], str, str, str]:
     fallback = normalize_preview_text(raw_content) or "아직 기사 본문이 수집되지 않았습니다."
 
     if not settings.openai_api_key:
-        return provisional_topic, fallback, "system", "preview-truncation", "completed"
+        return provisional_topic, fallback, "보통", [], "", [], "system", "preview-truncation", "completed"
 
     try:
         service = OpenAISummaryService()
@@ -399,11 +488,21 @@ def build_summary(
             raw_content=raw_content,
         )
         if analysis.summary:
-            return analysis.topic, analysis.summary, "openai", settings.openai_model, "completed"
+            return (
+                analysis.topic,
+                analysis.summary,
+                analysis.importance,
+                analysis.key_points,
+                analysis.research_value,
+                analysis.tracking_keywords,
+                "openai",
+                settings.openai_model,
+                "completed",
+            )
     except Exception:
         pass
 
-    return provisional_topic, fallback, "system", "preview-truncation", "completed"
+    return provisional_topic, fallback, "보통", [], "", [], "system", "preview-truncation", "completed"
 
 
 def emit_event(event_callback: EventCallback | None, event_type: str, payload: dict) -> None:

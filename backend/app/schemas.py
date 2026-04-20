@@ -26,6 +26,10 @@ class ReportPreviewResponse(BaseModel):
     destination: str
     summary: str
     preview_message: str
+    importance: str | None = None
+    key_points: list[str] = Field(default_factory=list)
+    research_value: str | None = None
+    tracking_keywords: list[str] = Field(default_factory=list)
 
 
 class IssueDetailResponse(BaseModel):
@@ -90,3 +94,24 @@ class RuntimeProfileResponse(BaseModel):
     configured: RuntimeTuningProfile
     effective: RuntimeTuningProfile
     explicit: dict[str, bool]
+    scheduler_running: bool
+    auto_crawl_armed: bool
+    crawl_interval_minutes: int
+    next_crawl_run_at: datetime | None = None
+    next_daily_summary_run_at: datetime | None = None
+    auto_crawl_active: bool = False
+    auto_crawl_last_started_at: datetime | None = None
+    auto_crawl_last_finished_at: datetime | None = None
+    auto_crawl_last_status: str | None = None
+    auto_crawl_last_collected_count: int = 0
+    auto_crawl_last_saved_count: int = 0
+    auto_crawl_last_skipped_count: int = 0
+    auto_crawl_last_failed_count: int = 0
+
+
+class DailySummaryLatestResponse(BaseModel):
+    summary_date: str
+    channel: str
+    status: str
+    message_text: str
+    payload: dict

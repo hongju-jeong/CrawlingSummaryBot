@@ -1,6 +1,7 @@
 import asyncio
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 
@@ -15,23 +16,31 @@ from ..runtime.runtime_profile import (
 from .source_registry import SourceDefinition, get_source_definitions
 from .source_types import CrawledArticle, TOPIC_PRIORITY
 from .x_experimental_crawler import XExperimentalCrawler
+from ..runtime.crawl_control import is_cancelled
 
 
 class MultiSourcePollingCrawler:
-    def crawl_latest(self, limit_per_source: int) -> list[CrawledArticle]:
+    def crawl_latest(self, limit_per_source: int, *, cancel_token: Any | None = None) -> list[CrawledArticle]:
         groups = [group for group in settings.crawler_enabled_source_groups if get_source_definitions(group)]
         if not groups:
+            return []
+        if is_cancelled(cancel_token):
             return []
 
         max_workers = min(get_effective_crawler_processes(), len(groups))
         if max_workers <= 1:
-            articles = asyncio.run(_crawl_group_async(groups[0], limit_per_source))
+            articles = asyncio.run(_crawl_group_async(groups[0], limit_per_source, cancel_token=cancel_token))
             return _prioritize_articles(articles)
 
         articles: list[CrawledArticle] = []
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_crawl_group_sync, group, limit_per_source) for group in groups]
+            futures = [
+                executor.submit(_crawl_group_sync, group, limit_per_source, cancel_token)
+                for group in groups
+            ]
             for future in as_completed(futures):
+                if is_cancelled(cancel_token):
+                    break
                 try:
                     articles.extend(future.result())
                 except Exception:
@@ -39,13 +48,15 @@ class MultiSourcePollingCrawler:
         return _prioritize_articles(articles)
 
 
-def _crawl_group_sync(group: str, limit_per_source: int) -> list[CrawledArticle]:
-    return asyncio.run(_crawl_group_async(group, limit_per_source))
+def _crawl_group_sync(group: str, limit_per_source: int, cancel_token: Any | None = None) -> list[CrawledArticle]:
+    return asyncio.run(_crawl_group_async(group, limit_per_source, cancel_token=cancel_token))
 
 
-async def _crawl_group_async(group: str, limit_per_source: int) -> list[CrawledArticle]:
+async def _crawl_group_async(group: str, limit_per_source: int, *, cancel_token: Any | None = None) -> list[CrawledArticle]:
     source_definitions = get_source_definitions(group)
     if not source_definitions:
+        return []
+    if is_cancelled(cancel_token):
         return []
 
     headers = {"User-Agent": settings.crawler_user_agent}
@@ -60,6 +71,7 @@ async def _crawl_group_async(group: str, limit_per_source: int) -> list[CrawledA
                 limit_per_source=limit_per_source,
                 host_limiters=host_limiters,
                 robots_cache=robots_cache,
+                cancel_token=cancel_token,
             )
             for definition in source_definitions
         ]
@@ -79,7 +91,10 @@ async def _crawl_source(
     limit_per_source: int,
     host_limiters: dict[str, asyncio.Semaphore],
     robots_cache: RobotsPolicyCache,
+    cancel_token: Any | None = None,
 ) -> list[CrawledArticle]:
+    if is_cancelled(cancel_token):
+        return []
     if source.source_type == "html":
         return await HTMLSourceCrawler().crawl_source(
             source,
@@ -87,11 +102,17 @@ async def _crawl_source(
             client=client,
             host_limiters=host_limiters,
             robots_cache=robots_cache,
+            cancel_token=cancel_token,
         )
     if source.source_type == "api":
-        return await GNewsAPICrawler().crawl_source(source, limit=limit_per_source, client=client)
+        return await GNewsAPICrawler().crawl_source(
+            source,
+            limit=limit_per_source,
+            client=client,
+            cancel_token=cancel_token,
+        )
     if source.source_type == "experimental_x":
-        return await XExperimentalCrawler().crawl_source(source, limit=limit_per_source)
+        return await XExperimentalCrawler().crawl_source(source, limit=limit_per_source, cancel_token=cancel_token)
     return []
 
 

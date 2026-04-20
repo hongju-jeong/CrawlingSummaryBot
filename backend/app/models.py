@@ -61,6 +61,10 @@ class IssueSummary(Base):
     llm_model: Mapped[str] = mapped_column(String(100), nullable=False)
     prompt_version: Mapped[str | None] = mapped_column(String(30))
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    importance: Mapped[str | None] = mapped_column(String(20))
+    key_points_json: Mapped[str | None] = mapped_column(Text)
+    research_value: Mapped[str | None] = mapped_column(Text)
+    tracking_keywords_json: Mapped[str | None] = mapped_column(Text)
     summary_status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="completed", server_default="completed"
     )
@@ -70,6 +74,22 @@ class IssueSummary(Base):
 
     issue: Mapped[Issue] = relationship(back_populates="summaries")
     reports: Mapped[list["Report"]] = relationship(back_populates="summary")
+
+
+class DailySummary(Base):
+    __tablename__ = "daily_summaries"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    summary_date: Mapped[str] = mapped_column(String(10), unique=True, nullable=False, index=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("report_channels.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="ready", server_default="ready")
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    channel: Mapped["ReportChannel"] = relationship()
 
 
 class ReportChannel(Base):

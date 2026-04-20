@@ -1,13 +1,21 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from ...config import settings
+from ..runtime.crawl_control import is_cancelled
 from .source_registry import SourceDefinition
 from .source_types import CrawledArticle, TOPIC_POLITICS
 
 
 class XExperimentalCrawler:
-    async def crawl_source(self, source: SourceDefinition, *, limit: int) -> list[CrawledArticle]:
-        if not settings.x_experimental_enabled or not settings.x_accounts:
+    async def crawl_source(
+        self,
+        source: SourceDefinition,
+        *,
+        limit: int,
+        cancel_token: Any | None = None,
+    ) -> list[CrawledArticle]:
+        if not settings.x_experimental_enabled or not settings.x_accounts or is_cancelled(cancel_token):
             return []
 
         try:
@@ -20,12 +28,16 @@ class XExperimentalCrawler:
         per_account_limit = min(limit, settings.x_max_posts_per_account)
 
         for account in settings.x_accounts:
+            if is_cancelled(cancel_token):
+                break
             try:
                 user = await api.user_by_login(account)
                 if user is None:
                     continue
                 count = 0
                 async for tweet in api.user_tweets(user.id, limit=per_account_limit):
+                    if is_cancelled(cancel_token):
+                        break
                     text = " ".join((tweet.rawContent or "").split())
                     if not text:
                         continue
