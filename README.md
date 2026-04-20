@@ -142,7 +142,6 @@ npm run build
 
 ## Roadmap
 
-- robots.txt 검사 및 crawl-delay 반영
 - 소스별 파서 품질 보정
 - X 실험 모듈 인증 정리
 - Docker 기반 실행 환경 정리
