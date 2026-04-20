@@ -55,6 +55,74 @@ select {
   padding-bottom: 36px;
 }
 
+.workspace-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.tab-sidebar {
+  position: sticky;
+  top: 28px;
+  display: grid;
+  gap: 14px;
+}
+
+.sidebar-title {
+  font-size: 1.6rem;
+  line-height: 1.1;
+}
+
+.sidebar-copy {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.tab-nav {
+  display: grid;
+  gap: 10px;
+}
+
+.tab-button {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.35);
+  color: var(--text);
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.tab-button:hover,
+.tab-button.active {
+  border-color: rgba(214, 111, 50, 0.28);
+  background: rgba(214, 111, 50, 0.08);
+  transform: translateY(-1px);
+}
+
+.tab-button-title {
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+.tab-button-copy {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.tab-content {
+  display: grid;
+  gap: 20px;
+}
+
 .eyebrow {
   margin: 0 0 10px;
   color: var(--accent-deep);
@@ -263,6 +331,53 @@ h1 {
   gap: 20px;
 }
 
+.daily-summary-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.daily-topic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.daily-topic-card {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(35, 28, 20, 0.08);
+}
+
+.daily-keyword-list {
+  display: grid;
+  gap: 12px;
+}
+
+.daily-keyword-row {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 250, 240, 0.62);
+  border: 1px solid rgba(214, 111, 50, 0.1);
+  display: grid;
+  gap: 10px;
+}
+
+.daily-keyword-description {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.daily-keyword-link {
+  color: var(--accent-deep);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.daily-keyword-link:hover {
+  text-decoration: underline;
+}
+
 .stat-card {
   display: grid;
   gap: 8px;
@@ -451,6 +566,12 @@ h1 {
   background: rgba(255, 255, 255, 0.4);
 }
 
+.analysis-list ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
 .detail-label {
   display: block;
   color: var(--muted);
@@ -511,12 +632,21 @@ h1 {
 }
 
 @media (max-width: 1180px) {
+  .workspace-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .tab-sidebar {
+    position: static;
+  }
+
   .monitor-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboard-grid,
-  .focused-grid {
+  .focused-grid,
+  .daily-topic-grid {
     grid-template-columns: 1fr;
   }
 
@@ -541,6 +671,10 @@ h1 {
 @media (max-width: 760px) {
   .page-shell {
     padding: 20px 16px;
+  }
+
+  .tab-sidebar {
+    padding: 18px;
   }
 
   .hero {

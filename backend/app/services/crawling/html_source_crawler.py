@@ -3,12 +3,14 @@ from collections.abc import Iterable
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 import json
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ...config import settings
+from ..runtime.crawl_control import is_cancelled
 from ..runtime.runtime_profile import get_effective_crawler_host_concurrency
 from .robots_policy import RobotsPolicyCache
 from .source_registry import SourceDefinition
@@ -28,7 +30,10 @@ class HTMLSourceCrawler:
         client: httpx.AsyncClient,
         host_limiters: dict[str, asyncio.Semaphore],
         robots_cache: RobotsPolicyCache | None = None,
+        cancel_token: Any | None = None,
     ) -> list[CrawledArticle]:
+        if is_cancelled(cancel_token):
+            return []
         if robots_cache and not await robots_cache.can_fetch(
             source.start_url,
             client=client,
@@ -39,6 +44,8 @@ class HTMLSourceCrawler:
         html = await self._fetch_text(client, source.start_url, host_limiters, robots_cache=robots_cache)
         if not html:
             return []
+        if is_cancelled(cancel_token):
+            return []
 
         links = self._extract_article_links(source, html, limit=limit)
         tasks = [
@@ -48,6 +55,7 @@ class HTMLSourceCrawler:
                 client=client,
                 host_limiters=host_limiters,
                 robots_cache=robots_cache,
+                cancel_token=cancel_token,
             )
             for article_url in links
         ]
@@ -66,7 +74,10 @@ class HTMLSourceCrawler:
         client: httpx.AsyncClient,
         host_limiters: dict[str, asyncio.Semaphore],
         robots_cache: RobotsPolicyCache | None = None,
+        cancel_token: Any | None = None,
     ) -> CrawledArticle | None:
+        if is_cancelled(cancel_token):
+            return None
         if robots_cache and not await robots_cache.can_fetch(
             article_url,
             client=client,
@@ -74,7 +85,13 @@ class HTMLSourceCrawler:
         ):
             return None
 
-        html = await self._fetch_text(client, article_url, host_limiters, robots_cache=robots_cache)
+        html = await self._fetch_text(
+            client,
+            article_url,
+            host_limiters,
+            robots_cache=robots_cache,
+            cancel_token=cancel_token,
+        )
         if not html:
             return None
 
@@ -106,10 +123,13 @@ class HTMLSourceCrawler:
         url: str,
         host_limiters: dict[str, asyncio.Semaphore],
         robots_cache: RobotsPolicyCache | None = None,
+        cancel_token: Any | None = None,
     ) -> str:
         host = urlparse(url).netloc
         limiter = host_limiters.setdefault(host, asyncio.Semaphore(get_effective_crawler_host_concurrency()))
         for attempt in range(settings.crawler_retry_count + 1):
+            if is_cancelled(cancel_token):
+                return ""
             try:
                 if robots_cache:
                     await robots_cache.wait_for_slot(

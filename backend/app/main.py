@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes.crawl import router as crawl_router
+from .api.routes.daily_summaries import router as daily_summaries_router
 from .api.routes.delivery_logs import router as delivery_logs_router
 from .api.routes.health import router as health_router
 from .api.routes.issues import router as issues_router
@@ -41,3 +42,4 @@ app.include_router(runtime_profile_router)
 app.include_router(crawl_router)
 app.include_router(issues_router)
 app.include_router(delivery_logs_router)
+app.include_router(daily_summaries_router)

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     crawler_max_items_per_run: int = 20
     crawler_limit_per_source: int = 5
     crawler_schedule_enabled: bool = True
-    crawler_interval_minutes: int = 10
+    crawler_interval_minutes: int = 30
     crawler_processes: int = 4
     crawler_concurrency_per_process: int = 8
     crawler_host_concurrency: int = 2
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     topic_webhooks: Annotated[dict[str, str], NoDecode] = {}
     topic_channels: Annotated[dict[str, str], NoDecode] = {}
     slack_auto_send: bool = True
+    daily_summary_enabled: bool = True
+    daily_summary_webhook_url: str | None = None
+    daily_summary_channel: str = "#news-daily-digest"
+    daily_summary_cron_hour: int = 0
+    daily_summary_cron_minute: int = 0
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "low"

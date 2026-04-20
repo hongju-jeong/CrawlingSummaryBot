@@ -24,6 +24,7 @@ Swagger:
 - `GET /api/issues`
 - `GET /api/issues/{issue_id}`
 - `GET /api/issues/{issue_id}/preview`
+- `GET /api/daily-summaries/latest`
 - `GET /api/delivery-logs`
 
 ## Structure
@@ -52,6 +53,7 @@ backend/app/
       issue_ingestion.py
       topic_classifier.py
     reporting/
+      daily_summary.py
       openai_summary.py
       slack_reporter.py
     runtime/
@@ -115,7 +117,7 @@ APP_CRAWLER_TIMEOUT_SECONDS=10
 APP_CRAWLER_MAX_ITEMS_PER_RUN=20
 APP_CRAWLER_LIMIT_PER_SOURCE=5
 APP_CRAWLER_SCHEDULE_ENABLED=true
-APP_CRAWLER_INTERVAL_MINUTES=10
+APP_CRAWLER_INTERVAL_MINUTES=30
 APP_CRAWLER_RESPECT_ROBOTS=true
 APP_CRAWLER_ROBOTS_CACHE_TTL_SECONDS=3600
 APP_CRAWLER_ROBOTS_USER_AGENT=*
@@ -125,6 +127,11 @@ APP_CRAWLER_HOST_CONCURRENCY=2
 APP_REPORT_WORKER_THREADS=4
 APP_GNEWS_API_KEY=
 APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+APP_DAILY_SUMMARY_ENABLED=true
+APP_DAILY_SUMMARY_WEBHOOK_URL=https://hooks.slack.com/services/your/daily-digest/webhook
+APP_DAILY_SUMMARY_CHANNEL=#news-daily-digest
+APP_DAILY_SUMMARY_CRON_HOUR=0
+APP_DAILY_SUMMARY_CRON_MINUTE=0
 APP_TOPIC_WEBHOOKS={"정치":"https://hooks.slack.com/services/your/politics/webhook","경제":"https://hooks.slack.com/services/your/economy/webhook","국제":"https://hooks.slack.com/services/your/global/webhook","산업/기업":"https://hooks.slack.com/services/your/business/webhook","기술/AI":"https://hooks.slack.com/services/your/tech/webhook","사회":"https://hooks.slack.com/services/your/society/webhook","연예":"https://hooks.slack.com/services/your/entertainment/webhook"}
 APP_TOPIC_CHANNELS={"정치":"#news-politics","경제":"#news-economy","국제":"#news-global","산업/기업":"#news-business","기술/AI":"#news-tech","사회":"#news-society","연예":"#news-entertainment"}
 APP_SLACK_AUTO_SEND=true
@@ -144,9 +151,10 @@ APP_X_ACCOUNTS=[]
 - `issues.category`는 주제(`정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`)로 사용됩니다.
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
 - 저장 시점의 rule-based 분류는 임시값입니다. 최종 주제는 OpenAI가 `topic + summary`를 함께 생성하는 후처리 단계에서 확정됩니다.
-- `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 결과를 저장합니다. 이때 요약과 주제 분류를 한 번의 OpenAI 호출로 처리합니다.
-- `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 `[주제] AI 요약 + 출처 + 링크` 형식으로 Slack으로 자동 전송합니다.
+- `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 결과를 저장합니다. 이때 요약, 최종 주제, 중요도, 핵심 포인트, 리서치 포인트, 추적 키워드를 한 번의 OpenAI 호출로 처리합니다.
+- `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 중요도에 따라 기본 카드 또는 리서치 카드 형식으로 Slack으로 자동 전송합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`는 JSON 한 줄 형식과 여러 줄 딕셔너리 형식을 모두 허용합니다.
+- `APP_DAILY_SUMMARY_ENABLED=true`이면 매일 자정에 전날 기준 사건 클러스터 기반 일일 키워드 다이제스트를 전용 Slack 채널로 전송합니다.
 - 스포츠 기사는 `연예` 주제로 함께 분류합니다.
 - `APP_X_EXPERIMENTAL_ENABLED=true`이고 `twscrape` 계정 설정이 준비되면 X 실험 모듈이 별도 그룹으로 동작합니다.

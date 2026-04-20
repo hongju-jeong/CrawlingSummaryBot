@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
+import json
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from .config import settings
-from .models import DeliveryLog, Issue, Report, ReportChannel, Source
+from .models import DailySummary, DeliveryLog, Issue, Report, ReportChannel, Source
+from .services.reporting.daily_summary import parse_daily_payload
 
 DEFAULT_TOPIC_DESTINATIONS = {
     "정치": "#news-politics",
@@ -58,8 +60,14 @@ def get_issue_preview(db: Session, issue_id: int) -> dict | None:
             "destination": settings.default_report_destination,
             "summary": summary,
             "preview_message": f"[{issue.category}] {summary}",
+            "importance": None,
+            "key_points": [],
+            "research_value": None,
+            "tracking_keywords": [],
         }
 
+    key_points = parse_json_list(report.summary.key_points_json if report.summary else None)
+    tracking_keywords = parse_json_list(report.summary.tracking_keywords_json if report.summary else None)
     return {
         "issue_id": report.issue.id,
         "title": report.issue.title,
@@ -71,6 +79,10 @@ def get_issue_preview(db: Session, issue_id: int) -> dict | None:
         "destination": report.channel.destination,
         "summary": report.summary.summary_text,
         "preview_message": report.preview_message,
+        "importance": report.summary.importance,
+        "key_points": key_points,
+        "research_value": report.summary.research_value,
+        "tracking_keywords": tracking_keywords,
     }
 
 
@@ -213,8 +225,49 @@ def to_display_status(status: str) -> str:
         "pending": "대기",
         "sent": "성공",
         "failed": "실패",
+        "cancelled": "중단",
     }
     return mapping.get(status, status)
+
+
+def get_latest_daily_summary_payload(db: Session) -> dict | None:
+    daily_summary = db.scalar(
+        select(DailySummary).options(joinedload(DailySummary.channel)).order_by(DailySummary.summary_date.desc())
+    )
+    return serialize_daily_summary(daily_summary)
+
+
+def get_daily_summary_payload(db: Session, summary_date: str) -> dict | None:
+    daily_summary = db.scalar(
+        select(DailySummary)
+        .options(joinedload(DailySummary.channel))
+        .where(DailySummary.summary_date == summary_date)
+    )
+    return serialize_daily_summary(daily_summary)
+
+
+def serialize_daily_summary(daily_summary: DailySummary | None) -> dict | None:
+    if daily_summary is None:
+        return None
+    return {
+        "summary_date": daily_summary.summary_date,
+        "channel": daily_summary.channel.name if daily_summary.channel else settings.daily_summary_channel,
+        "status": daily_summary.status,
+        "message_text": daily_summary.message_text,
+        "payload": parse_daily_payload(daily_summary.payload_json),
+    }
+
+
+def parse_json_list(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [str(item).strip() for item in payload if str(item).strip()]
 
 
 def to_issue_status(status: str) -> str:
@@ -223,5 +276,6 @@ def to_issue_status(status: str) -> str:
         "summarized": "AI 요약 완료",
         "sent": "전송 완료",
         "failed": "전송 실패",
+        "cancelled": "중단",
     }
     return mapping.get(status, status)

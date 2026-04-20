@@ -13,7 +13,9 @@ from ...schemas import CrawlJobSummaryResponse, LatestNewsCrawlRequest
 from ...services.crawling.multi_source_crawler import MultiSourcePollingCrawler
 from ...services.crawling.naver_latest_crawler import NaverLatestNewsCrawler
 from ...services.ingestion.issue_ingestion import save_crawled_articles
+from ...services.runtime.crawl_control import is_cancelled, registry
 from ...services.runtime.runtime_profile import get_effective_crawler_processes
+from ...services.runtime.scheduler import activate_auto_crawl_schedule
 
 router = APIRouter(prefix=settings.api_prefix, tags=["crawl"])
 
@@ -32,6 +34,7 @@ def crawl_latest_sources(
     crawler = MultiSourcePollingCrawler()
     articles = crawler.crawl_latest(payload.limit)
     result = save_crawled_articles(db, articles)
+    activate_auto_crawl_schedule()
     return CrawlJobSummaryResponse(
         source="multi-source",
         sources=sorted({article.source_name for article in articles}),
@@ -49,7 +52,12 @@ def crawl_latest_sources(
     description="크롤링 프로세스 수와 기사별 요약/전송 단계를 실시간으로 스트리밍합니다.",
 )
 def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_source, ge=1, le=20)) -> StreamingResponse:
+    run = registry.start()
+    if run is None:
+        raise HTTPException(status_code=409, detail="A crawl run is already active.")
+
     def event_stream():
+        event_queue: queue.Queue[dict | None] = queue.Queue()
         groups = [
             group
             for group in settings.crawler_enabled_source_groups
@@ -57,42 +65,51 @@ def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_
         ]
         active_groups = [group for group in groups if group in settings.crawler_enabled_source_groups]
         process_count = min(get_effective_crawler_processes(), len(active_groups)) if active_groups else 0
-        yield to_ndjson(
-            {
-                "type": "run_started",
-                "process_count": process_count,
-                "source_groups": active_groups,
-                "limit_per_source": limit,
-            }
-        )
-
-        crawler = MultiSourcePollingCrawler()
-        try:
-            articles = crawler.crawl_latest(limit)
-        except Exception as error:
-            yield to_ndjson({"type": "run_failed", "error": str(error)})
-            return
-
-        yield to_ndjson(
-            {
-                "type": "crawl_completed",
-                "discovered_count": len(articles),
-                "sources": sorted({article.source_name for article in articles}),
-            }
-        )
-
-        event_queue: queue.Queue[dict | None] = queue.Queue()
 
         def on_event(event_type: str, payload: dict) -> None:
             event_queue.put({"type": event_type, **payload})
 
-        def ingest_worker() -> None:
+        def run_worker() -> None:
             db = SessionLocal()
             try:
-                result = save_crawled_articles(db, articles, event_callback=on_event)
                 event_queue.put(
                     {
-                        "type": "run_completed",
+                        "type": "run_started",
+                        "run_id": run.run_id,
+                        "process_count": process_count,
+                        "source_groups": active_groups,
+                        "limit_per_source": limit,
+                    }
+                )
+                crawler = MultiSourcePollingCrawler()
+                articles = crawler.crawl_latest(limit, cancel_token=run.cancel_token)
+                if is_cancelled(run.cancel_token):
+                    event_queue.put(
+                        {
+                            "type": "run_cancelled",
+                            "collected_count": len(articles),
+                        }
+                    )
+                    return
+                event_queue.put(
+                    {
+                        "type": "crawl_completed",
+                        "discovered_count": len(articles),
+                        "sources": sorted({article.source_name for article in articles}),
+                    }
+                )
+                result = save_crawled_articles(
+                    db,
+                    articles,
+                    event_callback=on_event,
+                    cancel_token=run.cancel_token,
+                )
+                if not is_cancelled(run.cancel_token):
+                    activate_auto_crawl_schedule()
+                final_type = "run_cancelled" if is_cancelled(run.cancel_token) else "run_completed"
+                event_queue.put(
+                    {
+                        "type": final_type,
                         "collected_count": len(articles),
                         "saved_count": result.saved_count,
                         "skipped_count": result.skipped_count,
@@ -103,9 +120,10 @@ def stream_latest_sources(limit: int = Query(default=settings.crawler_limit_per_
                 event_queue.put({"type": "run_failed", "error": str(error)})
             finally:
                 db.close()
+                registry.finish(run.run_id)
                 event_queue.put(None)
 
-        threading.Thread(target=ingest_worker, name="crawl-stream-ingest", daemon=True).start()
+        threading.Thread(target=run_worker, name="crawl-stream-ingest", daemon=True).start()
         while True:
             event = event_queue.get()
             if event is None:
@@ -132,6 +150,7 @@ def crawl_latest_news(
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail=f"Failed to fetch Naver News: {error}") from error
     result = save_crawled_articles(db, articles)
+    activate_auto_crawl_schedule()
     return CrawlJobSummaryResponse(
         source=settings.crawler_source_name,
         sources=[settings.crawler_source_name],
@@ -141,6 +160,15 @@ def crawl_latest_news(
         skipped_count=result.skipped_count,
         failed_count=result.failed_count,
     )
+
+
+@router.post(
+    "/crawl/latest/stop",
+    summary="실행 중인 최신 소식 수집 중단",
+)
+def stop_latest_sources() -> dict:
+    stopped = registry.stop()
+    return {"stopped": stopped}
 
 
 def to_ndjson(payload: dict) -> bytes:
