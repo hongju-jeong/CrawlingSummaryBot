@@ -387,14 +387,16 @@ onMounted(async () => {
           최신 뉴스 수집을 실행하면 기사별 처리 단계가 실시간으로 쌓입니다.
         </p>
 
-        <div v-for="item in liveItems" :key="item.identity" class="live-item">
-          <div class="issue-row-top">
-            <span class="badge subtle">{{ item.category }}</span>
-            <span class="badge" :class="item.statusTone">{{ item.stage }}</span>
+        <div v-else class="panel-scroll panel-scroll-tall">
+          <div v-for="item in liveItems" :key="item.identity" class="live-item">
+            <div class="issue-row-top">
+              <span class="badge subtle">{{ item.category }}</span>
+              <span class="badge" :class="item.statusTone">{{ item.stage }}</span>
+            </div>
+            <h3>{{ item.title }}</h3>
+            <p>{{ item.source }}</p>
+            <p v-if="item.summary" class="live-summary">{{ item.summary }}</p>
           </div>
-          <h3>{{ item.title }}</h3>
-          <p>{{ item.source }}</p>
-          <p v-if="item.summary" class="live-summary">{{ item.summary }}</p>
         </div>
       </section>
 
@@ -406,11 +408,13 @@ onMounted(async () => {
 
         <p v-if="!activityFeed.length" class="panel-state">아직 스트리밍 이벤트가 없습니다.</p>
 
-        <div v-for="event in activityFeed" :key="event.id" class="activity-row">
-          <span class="badge" :class="event.tone">{{ event.stage }}</span>
-          <div>
-            <strong>{{ event.title }}</strong>
-            <p>{{ event.meta }}</p>
+        <div v-else class="panel-scroll">
+          <div v-for="event in activityFeed" :key="event.id" class="activity-row">
+            <span class="badge" :class="event.tone">{{ event.stage }}</span>
+            <div>
+              <strong>{{ event.title }}</strong>
+              <p>{{ event.meta }}</p>
+            </div>
           </div>
         </div>
       </section>
@@ -426,21 +430,23 @@ onMounted(async () => {
           아직 저장된 뉴스가 없습니다. 상단의 `최신 뉴스 수집` 버튼을 눌러주세요.
         </p>
 
-        <div
-          v-for="issue in issues"
-          :key="issue.id"
-          class="issue-row"
-          :class="{ selected: issue.id === selectedIssue?.id }"
-          @click="selectIssue(issue.id)"
-        >
-          <div class="issue-row-top">
-            <span class="badge subtle">{{ issue.category }}</span>
-            <span class="issue-time">{{ issue.time }}</span>
-          </div>
-          <h3>{{ issue.title }}</h3>
-          <p>{{ issue.source }}</p>
-          <div class="issue-meta">
-            <span>{{ issue.report_status }}</span>
+        <div v-else class="panel-scroll panel-scroll-tall">
+          <div
+            v-for="issue in issues"
+            :key="issue.id"
+            class="issue-row"
+            :class="{ selected: issue.id === selectedIssue?.id }"
+            @click="selectIssue(issue.id)"
+          >
+            <div class="issue-row-top">
+              <span class="badge subtle">{{ issue.category }}</span>
+              <span class="issue-time">{{ issue.time }}</span>
+            </div>
+            <h3>{{ issue.title }}</h3>
+            <p>{{ issue.source }}</p>
+            <div class="issue-meta">
+              <span>{{ issue.report_status }}</span>
+            </div>
           </div>
         </div>
       </section>
@@ -493,21 +499,23 @@ onMounted(async () => {
 
         <p v-if="!logs.length" class="panel-state">아직 저장된 채널 전송 로그가 없습니다.</p>
 
-        <div v-for="log in logs" :key="log.id" class="log-row">
-          <div>
-            <strong>{{ log.title }}</strong>
-            <p>{{ log.category }} · {{ log.channel }} · {{ log.time }}</p>
+        <div v-else class="panel-scroll panel-scroll-tall">
+          <div v-for="log in logs" :key="log.id" class="log-row">
+            <div>
+              <strong>{{ log.title }}</strong>
+              <p>{{ log.category }} · {{ log.channel }} · {{ log.time }}</p>
+            </div>
+            <span
+              class="badge"
+              :class="{
+                active: log.status === '성공',
+                warning: log.status === '대기',
+                danger: log.status === '실패',
+              }"
+            >
+              {{ log.status }}
+            </span>
           </div>
-          <span
-            class="badge"
-            :class="{
-              active: log.status === '성공',
-              warning: log.status === '대기',
-              danger: log.status === '실패',
-            }"
-          >
-            {{ log.status }}
-          </span>
         </div>
       </section>
     </main>

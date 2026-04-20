@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...config import settings
 from ...database import SessionLocal
 from ...models import DeliveryLog, Issue, IssueSummary, Report
-from ...repository import get_or_create_default_channel, get_or_create_source, normalize_preview_text
+from ...repository import get_or_create_channel_for_topic, get_or_create_source, normalize_preview_text
 from ..reporting.openai_summary import OpenAISummaryService
 from ..runtime.runtime_profile import get_effective_report_worker_threads
 from ..reporting.slack_reporter import SlackReporter
@@ -35,11 +35,10 @@ def save_crawled_articles(
     *,
     event_callback: EventCallback | None = None,
 ) -> IngestionResult:
-    channel = get_or_create_default_channel(db)
     saved_count = 0
     skipped_count = 0
     failed_count = 0
-    post_process_jobs: list[tuple[int, int, bool]] = []
+    post_process_jobs: list[tuple[int, bool]] = []
 
     for article in articles:
         try:
@@ -82,7 +81,7 @@ def save_crawled_articles(
                 existing.source_id = source.id
                 existing.updated_at = datetime.now(timezone.utc)
                 db.flush()
-                post_process_jobs.append((existing.id, channel.id, False))
+                post_process_jobs.append((existing.id, False))
                 emit_event(
                     event_callback,
                     "item_skipped",
@@ -121,7 +120,7 @@ def save_crawled_articles(
                     "category": issue.category,
                 },
             )
-            post_process_jobs.append((issue.id, channel.id, True))
+            post_process_jobs.append((issue.id, True))
             saved_count += 1
         except Exception:
             failed_count += 1
@@ -145,7 +144,7 @@ def save_crawled_articles(
 
 
 def _run_post_process_jobs(
-    jobs: list[tuple[int, int, bool]],
+    jobs: list[tuple[int, bool]],
     *,
     event_callback: EventCallback | None = None,
 ) -> None:
@@ -154,14 +153,14 @@ def _run_post_process_jobs(
 
     max_workers = min(get_effective_report_worker_threads(), len(jobs))
     if max_workers <= 1:
-        for issue_id, channel_id, should_send in jobs:
-            _process_reporting_job(issue_id, channel_id, should_send, event_callback)
+        for issue_id, should_send in jobs:
+            _process_reporting_job(issue_id, should_send, event_callback)
         return
 
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="report-worker") as executor:
         futures = [
-            executor.submit(_process_reporting_job, issue_id, channel_id, should_send, event_callback)
-            for issue_id, channel_id, should_send in jobs
+            executor.submit(_process_reporting_job, issue_id, should_send, event_callback)
+            for issue_id, should_send in jobs
         ]
         for future in as_completed(futures):
             future.result()
@@ -169,7 +168,6 @@ def _run_post_process_jobs(
 
 def _process_reporting_job(
     issue_id: int,
-    channel_id: int,
     should_send: bool,
     event_callback: EventCallback | None = None,
 ) -> None:
@@ -182,7 +180,7 @@ def _process_reporting_job(
         )
         if issue is None:
             return
-        update_reporting_state(db, issue, channel_id, should_send=should_send, event_callback=event_callback)
+        update_reporting_state(db, issue, should_send=should_send, event_callback=event_callback)
         db.commit()
     except Exception as error:
         db.rollback()
@@ -218,17 +216,19 @@ def build_unique_hash(
 def update_reporting_state(
     db: Session,
     issue: Issue,
-    channel_id: int,
     *,
     should_send: bool,
     event_callback: EventCallback | None = None,
 ) -> None:
-    summary_text, llm_provider, llm_model, summary_status = build_summary(
+    topic, summary_text, llm_provider, llm_model, summary_status = build_summary(
         title=issue.title,
         press_name=issue.press_name or "",
         raw_content=issue.raw_content or "",
-        topic=issue.category,
+        source_name=issue.source.name if issue.source else issue.press_name or "출처 미상",
+        provisional_topic=issue.category,
     )
+    issue.category = topic
+    channel = get_or_create_channel_for_topic(db, issue.category)
     summary = db.scalar(
         select(IssueSummary).where(IssueSummary.issue_id == issue.id).order_by(IssueSummary.created_at.desc())
     )
@@ -268,12 +268,12 @@ def update_reporting_state(
     if issue.original_url:
         preview_lines.append(f"링크: {issue.original_url}")
     preview_message = "\n".join(preview_lines)
-    report = db.scalar(select(Report).where(Report.issue_id == issue.id, Report.channel_id == channel_id))
+    report = db.scalar(select(Report).where(Report.issue_id == issue.id).order_by(Report.created_at.desc()))
     if report is None:
         report = Report(
             issue_id=issue.id,
             summary_id=summary.id,
-            channel_id=channel_id,
+            channel_id=channel.id,
             report_title=issue.title,
             preview_message=preview_message,
             report_status="ready",
@@ -282,6 +282,7 @@ def update_reporting_state(
         db.flush()
     else:
         report.summary_id = summary.id
+        report.channel_id = channel.id
         report.report_title = issue.title
         report.preview_message = preview_message
 
@@ -301,7 +302,7 @@ def update_reporting_state(
 
     delivery_log = DeliveryLog(
         report_id=report.id,
-        channel_id=channel_id,
+        channel_id=channel.id,
         delivery_status="pending",
         delivered_at=None,
         retry_count=0,
@@ -331,7 +332,7 @@ def update_reporting_state(
             "issue_id": issue.id,
             "title": issue.title,
             "category": issue.category,
-            "destination": settings.default_report_destination,
+            "destination": report.channel.destination if report.channel else settings.default_report_destination,
         },
     )
     send_result = SlackReporter().send_summary(
@@ -377,26 +378,32 @@ def update_reporting_state(
         )
 
 
-def build_summary(*, title: str, press_name: str, raw_content: str, topic: str) -> tuple[str, str, str, str]:
+def build_summary(
+    *,
+    title: str,
+    press_name: str,
+    raw_content: str,
+    source_name: str,
+    provisional_topic: str,
+) -> tuple[str, str, str, str, str]:
     fallback = normalize_preview_text(raw_content) or "아직 기사 본문이 수집되지 않았습니다."
 
     if not settings.openai_api_key:
-        return fallback, "system", "preview-truncation", "completed"
+        return provisional_topic, fallback, "system", "preview-truncation", "completed"
 
     try:
         service = OpenAISummaryService()
-        summary = service.summarize_article(
+        analysis = service.analyze_article(
             title=title,
             press_name=press_name,
             raw_content=raw_content,
-            topic=topic,
         )
-        if summary:
-            return summary, "openai", settings.openai_model, "completed"
+        if analysis.summary:
+            return analysis.topic, analysis.summary, "openai", settings.openai_model, "completed"
     except Exception:
         pass
 
-    return fallback, "system", "preview-truncation", "completed"
+    return provisional_topic, fallback, "system", "preview-truncation", "completed"
 
 
 def emit_event(event_callback: EventCallback | None, event_type: str, payload: dict) -> None:
