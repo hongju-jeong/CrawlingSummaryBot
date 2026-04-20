@@ -20,11 +20,14 @@ Swagger:
 - `GET /health`
 - `GET /api/runtime-profile`
 - `POST /api/crawl/latest`
+- `GET /api/crawl/latest/stream`
+- `POST /api/crawl/latest/stop`
 - `POST /api/crawl/naver-news/latest`
 - `GET /api/issues`
 - `GET /api/issues/{issue_id}`
 - `GET /api/issues/{issue_id}/preview`
 - `GET /api/daily-summaries/latest`
+- `POST /api/daily-summaries/run`
 - `GET /api/delivery-logs`
 
 ## Structure
@@ -57,6 +60,7 @@ backend/app/
       openai_summary.py
       slack_reporter.py
     runtime/
+      crawl_control.py
       runtime_profile.py
       scheduler.py
   config.py
@@ -78,9 +82,9 @@ backend/app/
 - `services/ingestion`
   - 중복 체크, 저장, 임시 주제 분류, 후처리 큐 등록을 담당합니다.
 - `services/reporting`
-  - OpenAI 기반 `topic + summary` 분석과 Slack 전송처럼 외부 보고 채널 연동만 담당합니다.
+  - OpenAI 기반 기사 분석, Slack 전송, 일일 키워드 다이제스트 생성/전송을 담당합니다.
 - `services/runtime`
-  - 스케줄링, 런타임 튜닝, 머신 스펙 기반 추천값 계산을 담당합니다.
+  - 스케줄링, 런타임 튜닝, 머신 스펙 기반 추천값 계산, 수집 취소 제어를 담당합니다.
 - `repository.py`
   - 읽기 전용 조회와 응답 변환을 담당합니다.
 - `main.py`
@@ -126,10 +130,10 @@ APP_CRAWLER_CONCURRENCY_PER_PROCESS=8
 APP_CRAWLER_HOST_CONCURRENCY=2
 APP_REPORT_WORKER_THREADS=4
 APP_GNEWS_API_KEY=
-APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+APP_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/your/webhook/url"
 APP_DAILY_SUMMARY_ENABLED=true
-APP_DAILY_SUMMARY_WEBHOOK_URL=https://hooks.slack.com/services/your/daily-digest/webhook
-APP_DAILY_SUMMARY_CHANNEL=#news-daily-digest
+APP_DAILY_SUMMARY_WEBHOOK_URL="https://hooks.slack.com/services/your/daily-digest/webhook"
+APP_DAILY_SUMMARY_CHANNEL="#news-daily-digest"
 APP_DAILY_SUMMARY_CRON_HOUR=0
 APP_DAILY_SUMMARY_CRON_MINUTE=0
 APP_TOPIC_WEBHOOKS={"정치":"https://hooks.slack.com/services/your/politics/webhook","경제":"https://hooks.slack.com/services/your/economy/webhook","국제":"https://hooks.slack.com/services/your/global/webhook","산업/기업":"https://hooks.slack.com/services/your/business/webhook","기술/AI":"https://hooks.slack.com/services/your/tech/webhook","사회":"https://hooks.slack.com/services/your/society/webhook","연예":"https://hooks.slack.com/services/your/entertainment/webhook"}
@@ -145,7 +149,9 @@ APP_X_ACCOUNTS=[]
 
 - 기본값은 로컬 실행 편의를 위해 SQLite를 사용하지만 `APP_DATABASE_URL`로 PostgreSQL을 바로 연결할 수 있습니다.
 - 다중 소스 수집기는 네이버, 다음, 연합뉴스, KBS, Reuters, BBC, AP, GNews API를 대상으로 동작합니다.
-- `POST /api/crawl/latest`는 멀티프로세스 기반으로 소스 그룹을 병렬 수집합니다.
+- `POST /api/crawl/latest`와 `GET /api/crawl/latest/stream`은 멀티프로세스 기반으로 소스 그룹을 병렬 수집합니다.
+- `GET /api/crawl/latest/stream`는 프론트의 실시간 모니터링 이벤트 소스입니다.
+- `POST /api/crawl/latest/stop`는 수동 수집 실행 중 cooperative cancellation을 요청합니다.
 - HTML 기반 크롤러는 기본적으로 `robots.txt`를 조회하고 `Allow/Disallow` 및 `crawl-delay`를 존중합니다.
 - 기사 저장과 중복 체크는 순차로 처리하고, 후처리(OpenAI/Slack)는 `APP_REPORT_WORKER_THREADS` 기준 멀티스레드 worker로 병렬 처리합니다.
 - `issues.category`는 주제(`정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`)로 사용됩니다.
@@ -156,5 +162,17 @@ APP_X_ACCOUNTS=[]
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`는 JSON 한 줄 형식과 여러 줄 딕셔너리 형식을 모두 허용합니다.
 - `APP_DAILY_SUMMARY_ENABLED=true`이면 매일 자정에 전날 기준 사건 클러스터 기반 일일 키워드 다이제스트를 전용 Slack 채널로 전송합니다.
+- `POST /api/daily-summaries/run`으로 특정 날짜의 다이제스트를 Swagger에서 수동 생성/전송할 수 있습니다.
+- 자동 크롤링은 앱 시작 즉시 arm되지 않습니다. 첫 수동 수집이 성공적으로 끝난 뒤에만 interval 잡이 활성화됩니다.
+- 프론트는 `모니터링` 탭과 `전날 요약` 탭으로 나뉘며, 후자는 최근 daily digest와 토픽별 키워드를 표시합니다.
 - 스포츠 기사는 `연예` 주제로 함께 분류합니다.
 - `APP_X_EXPERIMENTAL_ENABLED=true`이고 `twscrape` 계정 설정이 준비되면 X 실험 모듈이 별도 그룹으로 동작합니다.
+
+## Testing
+
+```bash
+.venv/bin/pytest -q
+```
+
+- 테스트는 운영 `app.db` 대신 전용 임시 SQLite DB(`/tmp/ai_issue_dashboard_test.db`)를 사용합니다.
+- 즉 테스트 실행이 로컬 운영 데이터베이스를 직접 초기화하거나 오염시키지 않습니다.
