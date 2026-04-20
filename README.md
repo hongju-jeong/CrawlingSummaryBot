@@ -1,16 +1,114 @@
-# FastAPI Backend
+# AI Issue Monitoring Dashboard
 
-## Run
+뉴스와 외부 신호를 수집하고, AI가 요약한 뒤, 주제별 Slack 채널로 자동 보고하는 실시간 모니터링 대시보드입니다.
 
-```bash
-cd /home/muzy/testp/ai-issue-dashboard-vue
-cp .env.example .env
-source .venv/bin/activate
-uv sync
-uvicorn backend.app.main:app --reload
+Vue 프론트엔드에서 수집 진행 상태를 실시간으로 모니터링할 수 있고, FastAPI 백엔드는 멀티소스 크롤링, AI 요약, 주제 분류, Slack 전송을 처리합니다.
+
+## What It Does
+
+- 국내외 뉴스 소스를 주기적으로 수집합니다.
+- 수집한 기사를 DB에 저장하고 중복을 제거합니다.
+- OpenAI로 `주제 + 요약`을 한 번에 생성합니다.
+- 분류된 주제에 따라 서로 다른 Slack 채널로 전송합니다.
+- 프론트 대시보드에서 진행 상황, 이슈 리스트, AI 요약, 전송 로그를 실시간으로 확인할 수 있습니다.
+
+## Key Features
+
+- 다중 소스 뉴스 크롤링
+  - Naver, Daum, 연합뉴스, KBS, BBC, AP, GNews API
+- AI 후처리
+  - `gpt-5.4-mini` 기반 기사 요약
+  - LLM 기반 주제 분류
+- 주제별 Slack 라우팅
+  - `정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`
+- 실시간 모니터링 UI
+  - 크롤링 프로세스 수
+  - 기사별 처리 단계
+  - 실시간 이벤트 피드
+  - 전송 로그
+- 환경 적응형 실행 프로필
+  - 머신 스펙 기반 추천 프로세스/동시성 표시
+
+## Tech Stack
+
+- Frontend: Vue 3, Vite
+- Backend: FastAPI, SQLAlchemy
+- Crawling: httpx, BeautifulSoup
+- AI: OpenAI Responses API
+- Delivery: Slack Incoming Webhook
+- Storage: SQLite / PostgreSQL
+
+## Project Structure
+
+```text
+ai-issue-dashboard-vue/
+  backend/         # FastAPI backend and backend docs
+  src/             # Vue frontend
+  db/              # schema and ERD
+  tests/           # backend tests
+  .env.example     # environment variable example
+  README.md        # project overview
 ```
 
-## Endpoints
+세부 백엔드 구조와 실행 문서는 [backend/README.md](backend/README.md) 에 있습니다.
+
+## Quick Start
+
+### 1. Clone and install
+
+```bash
+git clone <your-repo-url>
+cd ai-issue-dashboard-vue
+cp .env.example .env
+```
+
+### 2. Backend
+
+```bash
+source .venv/bin/activate
+uv sync
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 3. Frontend
+
+다른 터미널에서 실행:
+
+```bash
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+### 4. Open in browser
+
+- Frontend: `http://<your-host>:5173`
+- Swagger: `http://<your-host>:8000/docs`
+
+WSL 환경에서는 `127.0.0.1` 대신 WSL IP로 접속해야 할 수 있습니다.
+
+## Environment
+
+중요한 설정 예시:
+
+```env
+APP_OPENAI_API_KEY=your_openai_api_key
+APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/default/webhook
+APP_TOPIC_WEBHOOKS={"정치":"...","경제":"...","국제":"...","산업/기업":"...","기술/AI":"...","사회":"...","연예":"..."}
+APP_TOPIC_CHANNELS={"정치":"#news-politics","경제":"#news-economy","국제":"#news-global","산업/기업":"#news-business","기술/AI":"#news-tech","사회":"#news-society","연예":"#news-entertainment"}
+```
+
+전체 환경변수 설명은 [backend/README.md](backend/README.md) 에 있습니다.
+
+## Workflow
+
+1. 뉴스 수집
+2. 중복 체크 및 DB 저장
+3. OpenAI가 `주제 + 요약` 생성
+4. 주제별 Slack 채널 선택
+5. Slack 전송 및 로그 저장
+6. 프론트 대시보드에 실시간 반영
+
+## API Overview
 
 - `GET /health`
 - `GET /api/runtime-profile`
@@ -21,120 +119,30 @@ uvicorn backend.app.main:app --reload
 - `GET /api/issues/{issue_id}/preview`
 - `GET /api/delivery-logs`
 
-## Structure
+## Use Cases
 
-백엔드는 역할 기준으로 아래처럼 나눕니다.
+- 실시간 이슈 모니터링
+- 주제별 뉴스 브리핑 자동화
+- Slack 기반 내부 보고 자동화
+- AI 요약을 활용한 정보 큐레이션
 
-```text
-backend/app/
-  api/
-    routes/
-      crawl.py
-      delivery_logs.py
-      health.py
-      issues.py
-      runtime_profile.py
-  services/
-    crawling/
-      gnews_api_crawler.py
-      html_source_crawler.py
-      multi_source_crawler.py
-      naver_latest_crawler.py
-      source_registry.py
-      source_types.py
-      x_experimental_crawler.py
-    ingestion/
-      issue_ingestion.py
-      topic_classifier.py
-    reporting/
-      openai_summary.py
-      slack_reporter.py
-    runtime/
-      runtime_profile.py
-      scheduler.py
-  config.py
-  database.py
-  models.py
-  repository.py
-  schemas.py
-  main.py
-```
+## Development Notes
 
-### Module ownership
+- 브랜치는 기능 단위로 나누는 것을 권장합니다.
+- 크롤링, 저장, 요약/전송, 런타임 로직은 역할별로 모듈 분리되어 있습니다.
+- 백엔드 변경 경계는 [backend/README.md](backend/README.md)에 정리되어 있습니다.
 
-- `api/routes`
-  - FastAPI 엔드포인트만 둡니다.
-  - 요청/응답 조립과 HTTP 예외 처리만 담당합니다.
-- `services/crawling`
-  - 외부 소스에서 데이터를 가져오는 로직만 둡니다.
-  - 새 뉴스 소스 추가는 이 디렉토리 안에서 끝나는 것이 목표입니다.
-- `services/ingestion`
-  - 중복 체크, 저장, 주제 분류, 후처리 큐 등록을 담당합니다.
-- `services/reporting`
-  - AI 요약과 Slack 전송처럼 외부 보고 채널 연동만 담당합니다.
-- `services/runtime`
-  - 스케줄링, 런타임 튜닝, 머신 스펙 기반 추천값 계산을 담당합니다.
-- `repository.py`
-  - 읽기 전용 조회와 응답 변환을 담당합니다.
-- `main.py`
-  - 앱 생성과 라우터 등록만 담당합니다.
-
-### Change boundaries
-
-기능 브랜치를 작게 유지하려면 아래 기준을 따릅니다.
-
-- 새 크롤러 추가
-  - `services/crawling/*`
-- 주제 분류/저장 정책 변경
-  - `services/ingestion/*`
-- AI 요약/Slack 포맷 변경
-  - `services/reporting/*`
-- 실행 프로필/스케줄 변경
-  - `services/runtime/*`
-- API 응답 형식 변경
-  - `api/routes/*`, `schemas.py`, `repository.py`
-
-## Environment
+## Testing
 
 ```bash
-cp .env.example .env
+.venv/bin/pytest -q
+npm run build
 ```
 
-`.env` 파일을 열어서 필요한 값을 수정합니다.
+## Roadmap
 
-예시:
-
-```env
-APP_DATABASE_URL=sqlite:///./app.db
-APP_CRAWLER_TIMEOUT_SECONDS=10
-APP_CRAWLER_MAX_ITEMS_PER_RUN=20
-APP_CRAWLER_LIMIT_PER_SOURCE=5
-APP_CRAWLER_SCHEDULE_ENABLED=true
-APP_CRAWLER_INTERVAL_MINUTES=10
-APP_CRAWLER_PROCESSES=4
-APP_CRAWLER_CONCURRENCY_PER_PROCESS=8
-APP_CRAWLER_HOST_CONCURRENCY=2
-APP_REPORT_WORKER_THREADS=4
-APP_GNEWS_API_KEY=
-APP_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
-APP_TOPIC_WEBHOOKS={"정치":"https://hooks.slack.com/services/your/politics/webhook","경제":"https://hooks.slack.com/services/your/economy/webhook","국제":"https://hooks.slack.com/services/your/global/webhook","산업/기업":"https://hooks.slack.com/services/your/business/webhook","기술/AI":"https://hooks.slack.com/services/your/tech/webhook","사회":"https://hooks.slack.com/services/your/society/webhook","연예":"https://hooks.slack.com/services/your/entertainment/webhook"}
-APP_TOPIC_CHANNELS={"정치":"#news-politics","경제":"#news-economy","국제":"#news-global","산업/기업":"#news-business","기술/AI":"#news-tech","사회":"#news-society","연예":"#news-entertainment"}
-APP_SLACK_AUTO_SEND=true
-APP_OPENAI_API_KEY=your_openai_api_key
-APP_OPENAI_MODEL=gpt-5.4-mini
-APP_X_EXPERIMENTAL_ENABLED=false
-APP_X_ACCOUNTS=[]
-```
-
-## Notes
-
-- 기본값은 로컬 실행 편의를 위해 SQLite를 사용하지만 `APP_DATABASE_URL`로 PostgreSQL을 바로 연결할 수 있습니다.
-- 다중 소스 수집기는 네이버, 다음, 연합뉴스, KBS, Reuters, BBC, AP, GNews API를 대상으로 동작합니다.
-- `POST /api/crawl/latest`는 멀티프로세스 기반으로 소스 그룹을 병렬 수집합니다.
-- 기사 저장과 중복 체크는 순차로 처리하고, AI 요약과 Slack 전송은 `APP_REPORT_WORKER_THREADS` 기준 멀티스레드 worker로 병렬 처리합니다.
-- `issues.category`는 주제(`정치`, `경제`, `국제`, `산업/기업`, `기술/AI`, `사회`, `연예`)로 사용됩니다.
-- `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
-- `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 요약 결과를 저장합니다.
-- `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 `[주제] AI 요약` 형식으로 Slack으로 자동 전송합니다.
-- `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
-- `APP_X_EXPERIMENTAL_ENABLED=true`이고 `twscrape` 계정 설정이 준비되면 X 실험 모듈이 별도 그룹으로 동작합니다.
+- robots.txt 검사 및 crawl-delay 반영
+- 소스별 파서 품질 보정
+- X 실험 모듈 인증 정리
+- Docker 기반 실행 환경 정리
+- 프론트 컴포넌트 분리 고도화

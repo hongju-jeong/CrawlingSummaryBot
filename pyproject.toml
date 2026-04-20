@@ -2,7 +2,7 @@
 name = "ai-issue-dashboard-backend"
 version = "0.1.0"
 description = "FastAPI backend for the AI issue monitoring prototype"
-readme = "db/ERD.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "apscheduler>=3.10.4",
