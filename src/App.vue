@@ -16,6 +16,7 @@ const activeTab = ref("monitoring");
 const activeAbortController = ref(null);
 const nowTick = ref(Date.now());
 const lastAutoCrawlSnapshot = ref(null);
+const lastAutoEventSeq = ref(0);
 const monitoringSummary = ref({
   processCount: 0,
   sourceGroups: [],
@@ -203,14 +204,25 @@ function applyAutoCrawlRuntime(runtime) {
   };
   const previous = lastAutoCrawlSnapshot.value;
 
+  if (runtime.auto_crawl_source_groups?.length) {
+    monitoringSummary.value.sourceGroups = runtime.auto_crawl_source_groups;
+  }
+
   if (runtime.auto_crawl_active && (!previous || !previous.active)) {
+    resetMonitoringState();
+    lastAutoEventSeq.value = 0;
     monitoringSummary.value.processCount = runtime.effective.crawler_processes;
-    pushActivity({
-      type: "run_started",
-      title: "자동 크롤링 실행",
-      process_count: runtime.effective.crawler_processes,
-      source_groups: monitoringSummary.value.sourceGroups,
-    });
+    monitoringSummary.value.sourceGroups = runtime.auto_crawl_source_groups ?? [];
+    void loadIssues();
+    void loadLogs();
+  }
+
+  if (runtime.auto_crawl_recent_events?.length) {
+    const newEvents = runtime.auto_crawl_recent_events.filter((event) => event.seq > lastAutoEventSeq.value);
+    for (const event of newEvents) {
+      applyStreamEvent(event);
+      lastAutoEventSeq.value = Math.max(lastAutoEventSeq.value, event.seq);
+    }
   }
 
   const justFinished = snapshot.finishedAt && (!previous || previous.finishedAt !== snapshot.finishedAt);
@@ -219,13 +231,7 @@ function applyAutoCrawlRuntime(runtime) {
     monitoringSummary.value.savedCount = snapshot.saved;
     monitoringSummary.value.skippedCount = snapshot.skipped;
     monitoringSummary.value.failedCount = snapshot.failed;
-    pushActivity({
-      type: snapshot.status === "failed" ? "run_failed" : "run_completed",
-      title: "자동 크롤링 완료",
-      saved_count: snapshot.saved,
-      skipped_count: snapshot.skipped,
-      failed_count: snapshot.failed,
-    });
+    monitoringSummary.value.sentCount = runtime.auto_crawl_last_sent_count ?? monitoringSummary.value.sentCount;
     void loadIssues();
     void loadLogs();
     void loadLatestDailySummary();

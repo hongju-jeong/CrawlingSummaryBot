@@ -100,6 +100,7 @@ class RuntimeProfileResponse(BaseModel):
     next_crawl_run_at: datetime | None = None
     next_daily_summary_run_at: datetime | None = None
     auto_crawl_active: bool = False
+    auto_crawl_source_groups: list[str] = Field(default_factory=list)
     auto_crawl_last_started_at: datetime | None = None
     auto_crawl_last_finished_at: datetime | None = None
     auto_crawl_last_status: str | None = None
@@ -107,6 +108,8 @@ class RuntimeProfileResponse(BaseModel):
     auto_crawl_last_saved_count: int = 0
     auto_crawl_last_skipped_count: int = 0
     auto_crawl_last_failed_count: int = 0
+    auto_crawl_last_sent_count: int = 0
+    auto_crawl_recent_events: list[dict] = Field(default_factory=list)
 
 
 class DailySummaryLatestResponse(BaseModel):

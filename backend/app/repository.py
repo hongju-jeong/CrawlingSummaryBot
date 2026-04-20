@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
@@ -17,6 +18,7 @@ DEFAULT_TOPIC_DESTINATIONS = {
     "사회": "#news-society",
     "연예": "#news-entertainment",
 }
+SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
 
 def list_issues(db: Session) -> list[dict]:
@@ -217,7 +219,9 @@ def format_relative_time(dt: datetime | None) -> str:
 def format_log_time(dt: datetime | None) -> str:
     if dt is None:
         return "-"
-    return dt.strftime("%H:%M")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(SEOUL_TZ).strftime("%H:%M")
 
 
 def to_display_status(status: str) -> str:

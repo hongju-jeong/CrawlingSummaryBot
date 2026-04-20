@@ -59,6 +59,7 @@ def get_runtime_profile() -> dict[str, object]:
         "next_crawl_run_at": scheduler_status["next_crawl_run_at"],
         "next_daily_summary_run_at": scheduler_status["next_daily_summary_run_at"],
         "auto_crawl_active": scheduler_status["auto_crawl_active"],
+        "auto_crawl_source_groups": scheduler_status["auto_crawl_source_groups"],
         "auto_crawl_last_started_at": scheduler_status["auto_crawl_last_started_at"],
         "auto_crawl_last_finished_at": scheduler_status["auto_crawl_last_finished_at"],
         "auto_crawl_last_status": scheduler_status["auto_crawl_last_status"],
@@ -66,6 +67,8 @@ def get_runtime_profile() -> dict[str, object]:
         "auto_crawl_last_saved_count": scheduler_status["auto_crawl_last_saved_count"],
         "auto_crawl_last_skipped_count": scheduler_status["auto_crawl_last_skipped_count"],
         "auto_crawl_last_failed_count": scheduler_status["auto_crawl_last_failed_count"],
+        "auto_crawl_last_sent_count": scheduler_status["auto_crawl_last_sent_count"],
+        "auto_crawl_recent_events": scheduler_status["auto_crawl_recent_events"],
     }
 
 

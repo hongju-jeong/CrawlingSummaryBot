@@ -19,6 +19,7 @@ DAILY_DIGEST_JOB_ID = "daily_keyword_digest"
 _auto_crawl_state_lock = Lock()
 _auto_crawl_state = {
     "active": False,
+    "source_groups": [],
     "last_started_at": None,
     "last_finished_at": None,
     "last_status": None,
@@ -26,20 +27,48 @@ _auto_crawl_state = {
     "last_saved_count": 0,
     "last_skipped_count": 0,
     "last_failed_count": 0,
+    "last_sent_count": 0,
+    "recent_events": [],
+    "event_seq": 0,
 }
 
 
 def run_latest_news_job() -> None:
     db = SessionLocal()
+    source_groups = list(settings.crawler_enabled_source_groups)
     _set_auto_crawl_state(
         active=True,
+        source_groups=source_groups,
         last_started_at=datetime.now(SEOUL_TZ),
+        last_finished_at=None,
         last_status="running",
+        last_collected_count=0,
+        last_saved_count=0,
+        last_skipped_count=0,
+        last_failed_count=0,
+        last_sent_count=0,
+        recent_events=[],
+    )
+    _record_auto_crawl_event(
+        "run_started",
+        {
+            "title": "자동 크롤링 실행",
+            "process_count": settings.crawler_processes,
+            "source_groups": source_groups,
+        },
     )
     try:
         crawler = MultiSourcePollingCrawler()
         articles = crawler.crawl_latest(settings.crawler_limit_per_source)
-        result = save_crawled_articles(db, articles)
+        _record_auto_crawl_event(
+            "crawl_completed",
+            {
+                "title": "자동 크롤링 수집 완료",
+                "discovered_count": len(articles),
+                "source_groups": source_groups,
+            },
+        )
+        result = save_crawled_articles(db, articles, event_callback=lambda event_type, payload: _record_auto_crawl_event(event_type, payload))
         _set_auto_crawl_state(
             active=False,
             last_finished_at=datetime.now(SEOUL_TZ),
@@ -49,12 +78,27 @@ def run_latest_news_job() -> None:
             last_skipped_count=result.skipped_count,
             last_failed_count=result.failed_count,
         )
+        _record_auto_crawl_event(
+            "run_completed",
+            {
+                "title": "자동 크롤링 완료",
+                "saved_count": result.saved_count,
+                "skipped_count": result.skipped_count,
+                "failed_count": result.failed_count,
+            },
+        )
     except Exception:
         db.rollback()
         _set_auto_crawl_state(
             active=False,
             last_finished_at=datetime.now(SEOUL_TZ),
             last_status="failed",
+        )
+        _record_auto_crawl_event(
+            "run_failed",
+            {
+                "title": "자동 크롤링 실패",
+            },
         )
     finally:
         db.close()
@@ -123,6 +167,7 @@ def get_scheduler_status() -> dict[str, object]:
             daily_job.next_run_time.isoformat() if daily_job and daily_job.next_run_time else None
         ),
         "auto_crawl_active": auto_crawl_state["active"],
+        "auto_crawl_source_groups": auto_crawl_state["source_groups"],
         "auto_crawl_last_started_at": (
             auto_crawl_state["last_started_at"].isoformat() if auto_crawl_state["last_started_at"] else None
         ),
@@ -134,6 +179,8 @@ def get_scheduler_status() -> dict[str, object]:
         "auto_crawl_last_saved_count": auto_crawl_state["last_saved_count"],
         "auto_crawl_last_skipped_count": auto_crawl_state["last_skipped_count"],
         "auto_crawl_last_failed_count": auto_crawl_state["last_failed_count"],
+        "auto_crawl_last_sent_count": auto_crawl_state["last_sent_count"],
+        "auto_crawl_recent_events": auto_crawl_state["recent_events"],
     }
 
 
@@ -157,3 +204,16 @@ def _ensure_daily_digest_job() -> None:
 def _set_auto_crawl_state(**updates) -> None:
     with _auto_crawl_state_lock:
         _auto_crawl_state.update(updates)
+
+
+def _record_auto_crawl_event(event_type: str, payload: dict[str, object]) -> None:
+    with _auto_crawl_state_lock:
+        _auto_crawl_state["event_seq"] += 1
+        event = {
+            "seq": _auto_crawl_state["event_seq"],
+            "type": event_type,
+            **payload,
+        }
+        _auto_crawl_state["recent_events"] = (_auto_crawl_state["recent_events"] + [event])[-80:]
+        if event_type == "delivery_sent":
+            _auto_crawl_state["last_sent_count"] += 1
