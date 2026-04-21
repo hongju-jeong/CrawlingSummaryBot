@@ -56,6 +56,7 @@ backend/app/
       issue_ingestion.py
       topic_classifier.py
     reporting/
+      daily_digest_retrieval.py
       daily_summary.py
       openai_summary.py
       slack_reporter.py
@@ -82,7 +83,7 @@ backend/app/
 - `services/ingestion`
   - 중복 체크, 저장, 임시 주제 분류, 후처리 큐 등록을 담당합니다.
 - `services/reporting`
-  - OpenAI 기반 기사 분석, Slack 전송, 일일 키워드 다이제스트 생성/전송을 담당합니다.
+  - OpenAI 기반 기사 분석, LangChain 기반 daily digest retrieval, Slack 전송, 일일 키워드 다이제스트 생성/전송을 담당합니다.
 - `services/runtime`
   - 스케줄링, 런타임 튜닝, 머신 스펙 기반 추천값 계산, 수집 취소 제어를 담당합니다.
 - `repository.py`
@@ -162,15 +163,17 @@ APP_X_ACCOUNTS=[]
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
 - 저장 시점의 rule-based 분류는 임시값입니다. 최종 주제는 OpenAI가 `topic + summary`를 함께 생성하는 후처리 단계에서 확정됩니다.
 - `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 결과를 저장합니다. 이때 요약, 최종 주제, 중요도, 핵심 포인트, 리서치 포인트, 추적 키워드를 한 번의 OpenAI 호출로 처리합니다.
-- `APP_OPENAI_EMBEDDING_MODEL`과 LangChain OpenAI를 사용해 기사 분석 결과의 임베딩을 `issue_embeddings`에 저장합니다.
-- daily digest는 키워드 선정 자체는 규칙 기반으로 유지하고, 키워드 설명 생성 전에 LangChain 기반 semantic retrieval로 관련 기사 문맥을 검색합니다.
+- `APP_OPENAI_EMBEDDING_MODEL`이 설정되면 기사 분석 결과를 바탕으로 `issue_embeddings`를 생성해 daily digest용 semantic retrieval에 사용합니다.
 - `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 중요도에 따라 기본 카드 또는 리서치 카드 형식으로 Slack으로 자동 전송합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`는 JSON 한 줄 형식과 여러 줄 딕셔너리 형식을 모두 허용합니다.
 - `APP_DAILY_SUMMARY_ENABLED=true`이면 매일 자정에 전날 기준 사건 클러스터 기반 일일 키워드 다이제스트를 전용 Slack 채널로 전송합니다.
+- daily digest는 키워드 선정은 규칙 기반으로 유지하고, 키워드 설명 생성 전에 LangChain 기반 retrieval로 관련 기사 문맥을 검색합니다.
+- `APP_DAILY_SUMMARY_RAG_ENABLED`, `APP_DAILY_SUMMARY_RAG_LOOKBACK_DAYS`, `APP_DAILY_SUMMARY_RAG_TOP_K`로 retrieval 범위를 조정할 수 있습니다.
 - `POST /api/daily-summaries/run`으로 특정 날짜의 다이제스트를 Swagger에서 수동 생성/전송할 수 있습니다.
+- 프론트 `전날 요약` 탭의 `요약 테스트` 버튼도 같은 수동 실행 API를 사용합니다.
 - 자동 크롤링은 앱 시작 즉시 arm되지 않습니다. 첫 수동 수집이 성공적으로 끝난 뒤에만 interval 잡이 활성화됩니다.
-- 프론트는 `모니터링` 탭과 `전날 요약` 탭으로 나뉘며, 후자는 최근 daily digest와 토픽별 키워드를 표시합니다.
+- 프론트는 `모니터링` 탭과 `전날 요약` 탭으로 나뉘며, 후자는 최근 daily digest와 토픽별 키워드를 표시하고 요약 테스트를 바로 실행할 수 있습니다.
 - 스포츠 기사는 `연예` 주제로 함께 분류합니다.
 - `APP_X_EXPERIMENTAL_ENABLED=true`이고 `twscrape` 계정 설정이 준비되면 X 실험 모듈이 별도 그룹으로 동작합니다.
 
@@ -180,5 +183,6 @@ APP_X_ACCOUNTS=[]
 .venv/bin/pytest -q
 ```
 
-- 테스트는 운영 `app.db` 대신 전용 임시 SQLite DB(`/tmp/ai_issue_dashboard_test.db`)를 사용합니다.
+- 테스트는 운영 `app.db` 대신 전용 임시 SQLite DB를 사용합니다.
+- 테스트용 SQLite 경로는 세션별 임시 파일로 분리됩니다.
 - 즉 테스트 실행이 로컬 운영 데이터베이스를 직접 초기화하거나 오염시키지 않습니다.
