@@ -149,6 +149,10 @@ def build_daily_payload(*, db: Session, summary_date: date, records: list[DailyI
 
     topics_payload = []
     llm_topics = []
+    rag_query_vectors = _build_rag_query_vectors(
+        topic_clusters=topic_clusters,
+        summary_date=summary_date,
+    )
     for topic, clusters in sorted(topic_clusters.items(), key=lambda item: item[0]):
         top_keywords = _rank_keywords_for_topic(clusters)
         if not top_keywords:
@@ -157,7 +161,13 @@ def build_daily_payload(*, db: Session, summary_date: date, records: list[DailyI
             {
                 "topic": topic,
                 "keywords": [
-                    _build_keyword_context(db, summary_date=summary_date, topic=topic, keyword_item=item)
+                    _build_keyword_context(
+                        db,
+                        summary_date=summary_date,
+                        topic=topic,
+                        keyword_item=item,
+                        query_vector=rag_query_vectors.get((topic, item["keyword"])),
+                    )
                     for item in top_keywords
                 ],
             }
@@ -446,7 +456,14 @@ def preview_text(content: str | None, max_length: int = 220) -> str:
     return text[: max_length - 1] + "…" if len(text) > max_length else text
 
 
-def _build_keyword_context(db: Session, *, summary_date: date, topic: str, keyword_item: dict) -> dict:
+def _build_keyword_context(
+    db: Session,
+    *,
+    summary_date: date,
+    topic: str,
+    keyword_item: dict,
+    query_vector: list[float] | None = None,
+) -> dict:
     prioritized_issue_ids = {issue.issue_id for cluster in keyword_item["clusters"] for issue in cluster.issues}
     try:
         docs, retrieval_method = retrieve_digest_context(
@@ -455,6 +472,7 @@ def _build_keyword_context(db: Session, *, summary_date: date, topic: str, keywo
             topic=topic,
             keyword=keyword_item["keyword"],
             prioritized_issue_ids=prioritized_issue_ids,
+            query_vector=query_vector,
         )
     except Exception:
         docs, retrieval_method = [], "rule_db"
@@ -478,3 +496,30 @@ def _build_keyword_context(db: Session, *, summary_date: date, topic: str, keywo
         "context_count": len(docs),
         "retrieval_method": retrieval_method,
     }
+
+
+def _build_rag_query_vectors(
+    *,
+    topic_clusters: dict[str, list[IssueCluster]],
+    summary_date: date,
+) -> dict[tuple[str, str], list[float]]:
+    if not settings.daily_summary_rag_enabled or not settings.openai_api_key:
+        return {}
+
+    pairs: list[tuple[str, str]] = []
+    texts: list[str] = []
+    for topic, clusters in sorted(topic_clusters.items(), key=lambda item: item[0]):
+        top_keywords = _rank_keywords_for_topic(clusters)
+        for item in top_keywords:
+            pairs.append((topic, item["keyword"]))
+            texts.append(f"{summary_date.isoformat()} {topic} {item['keyword']}")
+
+    if not texts:
+        return {}
+
+    try:
+        vectors = OpenAISummaryService().embed_texts(texts)
+    except Exception:
+        return {}
+
+    return {pair: vector for pair, vector in zip(pairs, vectors, strict=True)}

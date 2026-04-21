@@ -114,6 +114,7 @@ def retrieve_digest_context(
     topic: str,
     keyword: str,
     prioritized_issue_ids: set[int] | None = None,
+    query_vector: list[float] | None = None,
 ) -> tuple[list[DigestContextDoc], str]:
     start_dt = datetime.combine(summary_date - timedelta(days=max(settings.daily_summary_rag_lookback_days - 1, 0)), time.min)
     end_dt = datetime.combine(summary_date, time.max)
@@ -134,14 +135,15 @@ def retrieve_digest_context(
     if not rows:
         return [], "rule_db"
 
-    query_vector = None
     retrieval_method = "rule_db"
-    if settings.daily_summary_rag_enabled and settings.openai_api_key:
+    if query_vector is None and settings.daily_summary_rag_enabled and settings.openai_api_key:
         try:
             query_vector = OpenAISummaryService().embed_text(f"{topic} {keyword}")
             retrieval_method = "embedding"
         except Exception:
             query_vector = None
+    elif query_vector is not None:
+        retrieval_method = "embedding"
 
     docs: list[DigestContextDoc] = []
     for issue, summary, embedding in rows:

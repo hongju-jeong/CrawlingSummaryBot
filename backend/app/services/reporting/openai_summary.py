@@ -138,3 +138,15 @@ class OpenAISummaryService:
                 model=settings.openai_embedding_model,
             )
         return [float(item) for item in self._embedding_client.embed_query(text)]
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        if self._embedding_client is None:
+            from langchain_openai import OpenAIEmbeddings
+
+            self._embedding_client = OpenAIEmbeddings(
+                api_key=settings.openai_api_key,
+                model=settings.openai_embedding_model,
+            )
+        return [[float(value) for value in vector] for vector in self._embedding_client.embed_documents(texts)]
