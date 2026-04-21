@@ -14,6 +14,8 @@ const runtimeProfile = ref(null);
 const latestDailySummary = ref(null);
 const activeTab = ref("monitoring");
 const activeAbortController = ref(null);
+const isRunningDailySummary = ref(false);
+const dailySummaryRunMessage = ref("");
 const nowTick = ref(Date.now());
 const lastAutoCrawlSnapshot = ref(null);
 const lastAutoEventSeq = ref(0);
@@ -85,6 +87,14 @@ const autoCrawlIntervalLabel = computed(() => {
 });
 
 const dailySummaryTopics = computed(() => latestDailySummary.value?.payload?.topics ?? []);
+const dailySummaryRunDate = computed(() => {
+  const target = new Date();
+  target.setDate(target.getDate() - 1);
+  const year = target.getFullYear();
+  const month = String(target.getMonth() + 1).padStart(2, "0");
+  const day = String(target.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+});
 
 async function requestJson(url, options = {}) {
   const response = await fetch(url, {
@@ -175,6 +185,28 @@ async function loadLatestDailySummary() {
     latestDailySummary.value = await requestJson("/api/daily-summaries/latest");
   } catch (error) {
     latestDailySummary.value = null;
+  }
+}
+
+async function runDailySummaryTest() {
+  if (isRunningDailySummary.value) {
+    return;
+  }
+  isRunningDailySummary.value = true;
+  dailySummaryRunMessage.value = "";
+  errorMessage.value = "";
+
+  try {
+    latestDailySummary.value = await requestJson(
+      `/api/daily-summaries/run?summary_date=${encodeURIComponent(dailySummaryRunDate.value)}`,
+      { method: "POST" },
+    );
+    dailySummaryRunMessage.value = `${dailySummaryRunDate.value} 요약 테스트를 실행했습니다.`;
+  } catch (error) {
+    errorMessage.value = error.message;
+    dailySummaryRunMessage.value = "요약 테스트 실행에 실패했습니다.";
+  } finally {
+    isRunningDailySummary.value = false;
   }
 }
 
@@ -750,14 +782,24 @@ onUnmounted(() => {
             <article class="panel daily-summary-hero">
               <div class="panel-header">
                 <h2>최근 일일 요약 상태</h2>
-                <span v-if="latestDailySummary" class="badge active">{{ latestDailySummary.status }}</span>
+                <div class="panel-actions">
+                  <button class="action-button secondary" :disabled="isRunningDailySummary" @click="runDailySummaryTest">
+                    {{ isRunningDailySummary ? "요약 테스트 실행 중..." : "요약 테스트" }}
+                  </button>
+                  <span v-if="latestDailySummary" class="badge active">{{ latestDailySummary.status }}</span>
+                </div>
               </div>
+              <p v-if="dailySummaryRunMessage" class="panel-state">{{ dailySummaryRunMessage }}</p>
               <p v-if="!latestDailySummary" class="panel-state">아직 생성된 daily digest가 없습니다.</p>
               <template v-else>
                 <div class="detail-grid">
                   <div>
                     <span class="detail-label">요약 날짜</span>
                     <p>{{ latestDailySummary.summary_date }}</p>
+                  </div>
+                  <div>
+                    <span class="detail-label">테스트 기준 날짜</span>
+                    <p>{{ dailySummaryRunDate }}</p>
                   </div>
                   <div>
                     <span class="detail-label">전송 채널</span>

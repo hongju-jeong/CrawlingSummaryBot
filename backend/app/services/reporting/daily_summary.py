@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...config import settings
 from ...models import DailySummary, Issue, ReportChannel
 from ..crawling.source_registry import SOURCE_DEFINITIONS
+from .daily_digest_retrieval import retrieve_digest_context
 from .openai_summary import OpenAISummaryService
 from .slack_reporter import SlackReporter
 
@@ -58,6 +59,8 @@ class DailyIssueRecord:
     summary: str
     raw_content: str
     importance: str
+    key_points: list[str]
+    research_value: str
     tracking_keywords: list[str]
 
 
@@ -97,7 +100,7 @@ class IssueCluster:
 def build_daily_summary(db: Session, *, summary_date: date) -> DailySummary:
     channel = get_or_create_daily_summary_channel(db)
     records = _load_daily_issue_records(db, summary_date=summary_date)
-    payload = build_daily_payload(summary_date=summary_date, records=records)
+    payload = build_daily_payload(db=db, summary_date=summary_date, records=records)
     message_text = format_daily_summary_message(payload)
     daily_summary = db.scalar(select(DailySummary).where(DailySummary.summary_date == payload["summary_date"]))
     if daily_summary is None:
@@ -139,13 +142,17 @@ def get_latest_daily_summary(db: Session) -> DailySummary | None:
     )
 
 
-def build_daily_payload(*, summary_date: date, records: list[DailyIssueRecord]) -> dict:
+def build_daily_payload(*, db: Session, summary_date: date, records: list[DailyIssueRecord]) -> dict:
     topic_clusters: dict[str, list[IssueCluster]] = defaultdict(list)
     for record in records:
         _append_to_clusters(topic_clusters[record.topic], record)
 
     topics_payload = []
     llm_topics = []
+    rag_query_vectors = _build_rag_query_vectors(
+        topic_clusters=topic_clusters,
+        summary_date=summary_date,
+    )
     for topic, clusters in sorted(topic_clusters.items(), key=lambda item: item[0]):
         top_keywords = _rank_keywords_for_topic(clusters)
         if not top_keywords:
@@ -154,11 +161,13 @@ def build_daily_payload(*, summary_date: date, records: list[DailyIssueRecord]) 
             {
                 "topic": topic,
                 "keywords": [
-                    {
-                        "keyword": item["keyword"],
-                        "titles": [cluster.representative.title for cluster in item["clusters"][:3]],
-                        "summaries": [cluster.representative.summary for cluster in item["clusters"][:2]],
-                    }
+                    _build_keyword_context(
+                        db,
+                        summary_date=summary_date,
+                        topic=topic,
+                        keyword_item=item,
+                        query_vector=rag_query_vectors.get((topic, item["keyword"])),
+                    )
                     for item in top_keywords
                 ],
             }
@@ -173,6 +182,10 @@ def build_daily_payload(*, summary_date: date, records: list[DailyIssueRecord]) 
                         "representative_article_url": item["representative"].original_url,
                         "representative_article_title": item["representative"].title,
                         "description": "",
+                        "context_issue_ids": [],
+                        "context_count": 0,
+                        "retrieval_method": "rule_db",
+                        "explanation_version": "v2-rag",
                     }
                     for item in top_keywords
                 ],
@@ -184,6 +197,20 @@ def build_daily_payload(*, summary_date: date, records: list[DailyIssueRecord]) 
         topic_name = topic_payload["topic"]
         for keyword_payload in topic_payload["keywords"]:
             keyword = keyword_payload["keyword"]
+            llm_keyword = next(
+                (
+                    item
+                    for topic_item in llm_topics
+                    if topic_item["topic"] == topic_name
+                    for item in topic_item["keywords"]
+                    if item["keyword"] == keyword
+                ),
+                None,
+            )
+            if llm_keyword is not None:
+                keyword_payload["context_issue_ids"] = llm_keyword["context_issue_ids"]
+                keyword_payload["context_count"] = llm_keyword["context_count"]
+                keyword_payload["retrieval_method"] = llm_keyword["retrieval_method"]
             keyword_payload["description"] = descriptions.get(topic_name, {}).get(
                 keyword,
                 f"{summary_date.isoformat()} {topic_name} 기사에서 {keyword} 관련 보도가 집중되었습니다.",
@@ -268,6 +295,8 @@ def _load_daily_issue_records(db: Session, *, summary_date: date) -> list[DailyI
                 summary=latest_summary.summary_text if latest_summary else preview_text(issue.raw_content),
                 raw_content=issue.raw_content or "",
                 importance=latest_summary.importance if latest_summary and latest_summary.importance else "보통",
+                key_points=_parse_json_list(latest_summary.key_points_json if latest_summary else None),
+                research_value=latest_summary.research_value if latest_summary and latest_summary.research_value else "",
                 tracking_keywords=_parse_json_list(
                     latest_summary.tracking_keywords_json if latest_summary else None
                 ),
@@ -425,3 +454,72 @@ def preview_text(content: str | None, max_length: int = 220) -> str:
         return ""
     text = " ".join(content.split())
     return text[: max_length - 1] + "…" if len(text) > max_length else text
+
+
+def _build_keyword_context(
+    db: Session,
+    *,
+    summary_date: date,
+    topic: str,
+    keyword_item: dict,
+    query_vector: list[float] | None = None,
+) -> dict:
+    prioritized_issue_ids = {issue.issue_id for cluster in keyword_item["clusters"] for issue in cluster.issues}
+    try:
+        docs, retrieval_method = retrieve_digest_context(
+            db,
+            summary_date=summary_date,
+            topic=topic,
+            keyword=keyword_item["keyword"],
+            prioritized_issue_ids=prioritized_issue_ids,
+            query_vector=query_vector,
+        )
+    except Exception:
+        docs, retrieval_method = [], "rule_db"
+    return {
+        "keyword": keyword_item["keyword"],
+        "titles": [doc.title for doc in docs[:3]],
+        "summaries": [doc.summary for doc in docs[:2]],
+        "documents": [
+            {
+                "issue_id": doc.issue_id,
+                "title": doc.title,
+                "summary": doc.summary,
+                "key_points": doc.key_points,
+                "importance": doc.importance,
+                "source": doc.source_name,
+                "url": doc.original_url,
+            }
+            for doc in docs
+        ],
+        "context_issue_ids": [doc.issue_id for doc in docs],
+        "context_count": len(docs),
+        "retrieval_method": retrieval_method,
+    }
+
+
+def _build_rag_query_vectors(
+    *,
+    topic_clusters: dict[str, list[IssueCluster]],
+    summary_date: date,
+) -> dict[tuple[str, str], list[float]]:
+    if not settings.daily_summary_rag_enabled or not settings.openai_api_key:
+        return {}
+
+    pairs: list[tuple[str, str]] = []
+    texts: list[str] = []
+    for topic, clusters in sorted(topic_clusters.items(), key=lambda item: item[0]):
+        top_keywords = _rank_keywords_for_topic(clusters)
+        for item in top_keywords:
+            pairs.append((topic, item["keyword"]))
+            texts.append(f"{summary_date.isoformat()} {topic} {item['keyword']}")
+
+    if not texts:
+        return {}
+
+    try:
+        vectors = OpenAISummaryService().embed_texts(texts)
+    except Exception:
+        return {}
+
+    return {pair: vector for pair, vector in zip(pairs, vectors, strict=True)}

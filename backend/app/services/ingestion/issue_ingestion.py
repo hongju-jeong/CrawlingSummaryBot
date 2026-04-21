@@ -15,6 +15,7 @@ from ...database import SessionLocal
 from ...models import DeliveryLog, Issue, IssueSummary, Report
 from ...repository import get_or_create_channel_for_topic, get_or_create_source, normalize_preview_text
 from ..reporting.openai_summary import OpenAISummaryService
+from ..reporting.daily_digest_retrieval import upsert_issue_embedding
 from ..runtime.crawl_control import is_cancelled
 from ..runtime.runtime_profile import get_effective_report_worker_threads
 from ..reporting.slack_reporter import SlackReporter, format_article_message
@@ -314,6 +315,18 @@ def update_reporting_state(
         summary.research_value = research_value
         summary.tracking_keywords_json = json.dumps(tracking_keywords, ensure_ascii=False)
         summary.summary_status = summary_status
+
+    try:
+        upsert_issue_embedding(
+            db,
+            issue=issue,
+            summary=summary,
+            key_points=key_points,
+            research_value=research_value,
+            tracking_keywords=tracking_keywords,
+        )
+    except Exception:
+        pass
 
     emit_event(
         event_callback,

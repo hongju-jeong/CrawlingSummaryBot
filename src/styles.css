@@ -188,6 +188,13 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.action-button.secondary {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent-deep);
+  border: 1px solid rgba(214, 111, 50, 0.2);
+  box-shadow: none;
+}
+
 .action-button:disabled {
   opacity: 0.58;
   cursor: default;
@@ -226,6 +233,14 @@ h1 {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .panel-header h2 {
