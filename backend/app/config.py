@@ -46,8 +46,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "low"
+    openai_embedding_model: str = "text-embedding-3-small"
     gnews_api_key: str | None = None
     gnews_base_url: str = "https://gnews.io/api/v4/top-headlines"
+    daily_summary_rag_enabled: bool = True
+    daily_summary_rag_lookback_days: int = 3
+    daily_summary_rag_top_k: int = 4
     x_experimental_enabled: bool = False
     x_accounts: list[str] = []
     x_max_posts_per_account: int = 3

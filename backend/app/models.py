@@ -50,6 +50,7 @@ class Issue(Base):
     source: Mapped[Source] = relationship(back_populates="issues")
     summaries: Mapped[list["IssueSummary"]] = relationship(back_populates="issue")
     reports: Mapped[list["Report"]] = relationship(back_populates="issue")
+    embedding: Mapped["IssueEmbedding | None"] = relationship(back_populates="issue")
 
 
 class IssueSummary(Base):
@@ -74,6 +75,26 @@ class IssueSummary(Base):
 
     issue: Mapped[Issue] = relationship(back_populates="summaries")
     reports: Mapped[list["Report"]] = relationship(back_populates="summary")
+
+
+class IssueEmbedding(Base):
+    __tablename__ = "issue_embeddings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    issue_id: Mapped[int] = mapped_column(
+        ForeignKey("issues.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
+    )
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    issue: Mapped[Issue] = relationship(back_populates="embedding")
 
 
 class DailySummary(Base):

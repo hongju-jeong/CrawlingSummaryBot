@@ -20,6 +20,7 @@ class OpenAIArticleAnalysis:
 class OpenAISummaryService:
     def __init__(self) -> None:
         self.client = OpenAI(api_key=settings.openai_api_key)
+        self._embedding_client = None
 
     def analyze_article(self, *, title: str, press_name: str, raw_content: str) -> OpenAIArticleAnalysis:
         response = self.client.responses.create(
@@ -89,7 +90,10 @@ class OpenAISummaryService:
                 "You are a Korean newsroom research assistant. "
                 "For each topic and keyword, write a short factual Korean explanation sentence "
                 "describing why that keyword drew attention that day. "
-                "Do not invent facts. Use the provided titles and summaries only."
+                "Use the provided retrieved article context to ground the explanation. "
+                "Prefer cross-article common context over a single headline. "
+                "If the retrieved documents disagree, stay conservative and describe only the overlap. "
+                "Do not invent facts."
             ),
             input=[
                 {
@@ -124,3 +128,13 @@ class OpenAISummaryService:
                 if str(description).strip()
             }
         return normalized
+
+    def embed_text(self, text: str) -> list[float]:
+        if self._embedding_client is None:
+            from langchain_openai import OpenAIEmbeddings
+
+            self._embedding_client = OpenAIEmbeddings(
+                api_key=settings.openai_api_key,
+                model=settings.openai_embedding_model,
+            )
+        return [float(item) for item in self._embedding_client.embed_query(text)]

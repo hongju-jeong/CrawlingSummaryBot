@@ -141,6 +141,10 @@ APP_TOPIC_CHANNELS={"정치":"#news-politics","경제":"#news-economy","국제":
 APP_SLACK_AUTO_SEND=true
 APP_OPENAI_API_KEY=your_openai_api_key
 APP_OPENAI_MODEL=gpt-5.4-mini
+APP_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+APP_DAILY_SUMMARY_RAG_ENABLED=true
+APP_DAILY_SUMMARY_RAG_LOOKBACK_DAYS=3
+APP_DAILY_SUMMARY_RAG_TOP_K=4
 APP_X_EXPERIMENTAL_ENABLED=false
 APP_X_ACCOUNTS=[]
 ```
@@ -158,6 +162,8 @@ APP_X_ACCOUNTS=[]
 - `.env`는 `.gitignore`에 포함되어 있어 git에 올라가지 않습니다.
 - 저장 시점의 rule-based 분류는 임시값입니다. 최종 주제는 OpenAI가 `topic + summary`를 함께 생성하는 후처리 단계에서 확정됩니다.
 - `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 결과를 저장합니다. 이때 요약, 최종 주제, 중요도, 핵심 포인트, 리서치 포인트, 추적 키워드를 한 번의 OpenAI 호출로 처리합니다.
+- `APP_OPENAI_EMBEDDING_MODEL`과 LangChain OpenAI를 사용해 기사 분석 결과의 임베딩을 `issue_embeddings`에 저장합니다.
+- daily digest는 키워드 선정 자체는 규칙 기반으로 유지하고, 키워드 설명 생성 전에 LangChain 기반 semantic retrieval로 관련 기사 문맥을 검색합니다.
 - `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 중요도에 따라 기본 카드 또는 리서치 카드 형식으로 Slack으로 자동 전송합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`는 JSON 한 줄 형식과 여러 줄 딕셔너리 형식을 모두 허용합니다.
