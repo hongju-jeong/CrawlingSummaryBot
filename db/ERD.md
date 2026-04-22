@@ -1,114 +1,137 @@
-# ERD Summary
+# Current DB Schema in dbdiagram
 
-FastAPI 백엔드 기준으로 현재 화면에 필요한 데이터 구조를 ERD 형태의 표로 정리한 문서입니다.
+현재 실행 기준 스키마는 `backend/app/models.py`의 SQLAlchemy ORM을 따릅니다.
+아래 문법은 `dbdiagram.io`에 바로 붙여 넣을 수 있는 DBML입니다.
 
-## 1. `sources`
+```dbml
+Table sources {
+  id integer [pk]
+  name varchar(100) [not null, unique]
+  source_type varchar(30) [not null]
+  base_url text
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+}
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | 이슈를 수집하는 외부 데이터 출처 |
-| PK | `id` |
-| 주요 컬럼 | `name`, `source_type`, `base_url`, `is_active`, `created_at` |
-| 참조 관계 | `issues.source_id` 가 `sources.id` 참조 |
+Table issues {
+  id integer [pk]
+  source_id integer [not null, ref: > sources.id]
+  external_id varchar(255)
+  press_name varchar(100)
+  title varchar(500) [not null]
+  original_url text
+  category varchar(50) [not null, default: "뉴스"]
+  region varchar(20)
+  published_at timestamptz
+  collected_at timestamptz [not null]
+  raw_content text
+  status varchar(30) [not null, default: "collected"]
+  unique_hash varchar(64) [unique]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
 
-## 2. `issues`
+  Indexes {
+    source_id
+    collected_at
+    unique_hash
+  }
+}
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | 수집된 실시간 이슈 원본 데이터 |
-| PK | `id` |
-| FK | `source_id -> sources.id` |
-| 주요 컬럼 | `external_id`, `press_name`, `title`, `original_url`, `category`, `region`, `published_at`, `collected_at`, `raw_content`, `status`, `unique_hash` |
-| 화면 연결 | 실시간 이슈 리스트 |
+Table issue_summaries {
+  id integer [pk]
+  issue_id integer [not null, ref: > issues.id]
+  llm_provider varchar(50) [not null]
+  llm_model varchar(100) [not null]
+  prompt_version varchar(30)
+  summary_text text [not null]
+  importance varchar(20)
+  key_points_json text
+  research_value text
+  tracking_keywords_json text
+  summary_status varchar(30) [not null, default: "completed"]
+  created_at timestamptz [not null]
 
-## 3. `issue_keywords`
+  Indexes {
+    issue_id
+  }
+}
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | 이슈별 키워드 저장 |
-| PK | `id` |
-| FK | `issue_id -> issues.id` |
-| 주요 컬럼 | `keyword`, `created_at` |
-| 참조 관계 | 하나의 이슈에 여러 키워드 연결 가능 |
+Table issue_embeddings {
+  id integer [pk]
+  issue_id integer [not null, unique, ref: > issues.id]
+  embedding_model varchar(100) [not null]
+  content_hash varchar(64) [not null]
+  embedding_json text [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
 
-## 4. `issue_summaries`
+  Indexes {
+    issue_id
+  }
+}
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | LLM이 생성한 이슈 요약 결과 |
-| PK | `id` |
-| FK | `issue_id -> issues.id` |
-| 주요 컬럼 | `llm_provider`, `llm_model`, `prompt_version`, `summary_text`, `summary_status`, `created_at` |
-| 화면 연결 | 자동 보고 미리보기 |
+Table report_channels {
+  id integer [pk]
+  name varchar(50) [not null, unique]
+  channel_type varchar(30) [not null]
+  destination varchar(255) [not null]
+  is_active boolean [not null, default: true]
+  created_at timestamptz [not null]
+}
 
-## 5. `report_channels`
+Table reports {
+  id integer [pk]
+  issue_id integer [not null, ref: > issues.id]
+  summary_id integer [not null, ref: > issue_summaries.id]
+  channel_id integer [not null, ref: > report_channels.id]
+  report_title varchar(500) [not null]
+  preview_message text [not null]
+  report_status varchar(30) [not null, default: "ready"]
+  created_at timestamptz [not null]
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | Slack, 이메일 등 자동 보고 대상 채널 |
-| PK | `id` |
-| 주요 컬럼 | `name`, `channel_type`, `destination`, `is_active`, `created_at` |
-| 참조 관계 | `reports.channel_id`, `delivery_logs.channel_id` 가 참조 |
+  Indexes {
+    issue_id
+    summary_id
+    channel_id
+  }
+}
 
-## 6. `reports`
+Table delivery_logs {
+  id integer [pk]
+  report_id integer [not null, ref: > reports.id]
+  channel_id integer [not null, ref: > report_channels.id]
+  delivery_status varchar(30) [not null]
+  delivered_at timestamptz
+  error_message text
+  response_code varchar(30)
+  response_body text
+  retry_count integer [not null, default: 0]
+  created_at timestamptz [not null]
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | 이슈와 LLM 요약을 바탕으로 생성된 보고 메시지 |
-| PK | `id` |
-| FK | `issue_id -> issues.id`, `summary_id -> issue_summaries.id`, `channel_id -> report_channels.id` |
-| 주요 컬럼 | `report_title`, `preview_message`, `report_status`, `created_at` |
-| 화면 연결 | 자동 보고 미리보기 |
+  Indexes {
+    report_id
+    channel_id
+    created_at
+  }
+}
 
-## 7. `delivery_logs`
+Table daily_summaries {
+  id integer [pk]
+  summary_date varchar(10) [not null, unique]
+  channel_id integer [not null, ref: > report_channels.id]
+  status varchar(30) [not null, default: "ready"]
+  message_text text [not null]
+  payload_json text [not null]
+  created_at timestamptz [not null]
 
-| 항목 | 내용 |
-|---|---|
-| 설명 | 채널 전송 이력 및 성공/실패 로그 |
-| PK | `id` |
-| FK | `report_id -> reports.id`, `channel_id -> report_channels.id` |
-| 주요 컬럼 | `delivery_status`, `delivered_at`, `error_message`, `response_code`, `response_body`, `retry_count`, `created_at` |
-| 화면 연결 | 채널 전송 로그 |
-
-## 관계 요약
-
-| 부모 테이블 | 자식 테이블 | 관계 |
-|---|---|---|
-| `sources` | `issues` | 1:N |
-| `issues` | `issue_keywords` | 1:N |
-| `issues` | `issue_summaries` | 1:N |
-| `issues` | `reports` | 1:N |
-| `issue_summaries` | `reports` | 1:N |
-| `report_channels` | `reports` | 1:N |
-| `reports` | `delivery_logs` | 1:N |
-| `report_channels` | `delivery_logs` | 1:N |
-
-## 화면 기준 데이터 흐름
-
-| 화면 기능 | 사용하는 테이블 |
-|---|---|
-| 실시간 이슈 리스트 | `issues`, `sources` |
-| 자동 보고 미리보기 | `issues`, `issue_summaries`, `reports`, `report_channels` |
-| 채널 전송 로그 | `delivery_logs`, `reports`, `report_channels` |
-
-## FastAPI 구현 관점
-
-| 계층 | 추천 매핑 |
-|---|---|
-| SQLAlchemy Model | 테이블별로 1개씩 생성 |
-| Pydantic Schema | `IssueListResponse`, `ReportPreviewResponse`, `DeliveryLogResponse` 등으로 분리 |
-| API Router | `/issues`, `/reports/preview/{issue_id}`, `/delivery-logs` |
-| Service Layer | `issue_service`, `summary_service`, `report_service`, `delivery_service` |
-
-## 간단한 ERD 텍스트 표현
-
-```text
-sources 1 --- N issues
-issues 1 --- N issue_keywords
-issues 1 --- N issue_summaries
-issues 1 --- N reports
-issue_summaries 1 --- N reports
-report_channels 1 --- N reports
-reports 1 --- N delivery_logs
-report_channels 1 --- N delivery_logs
+  Indexes {
+    summary_date
+    channel_id
+  }
+}
 ```
+
+참고:
+- 이 문서는 현재 ORM 모델 기준입니다.
+- `db/schema.sql`은 PostgreSQL 타깃 초안이라 현재 모델과 일부 차이가 있습니다.
+- 현재 모델에는 `issue_keywords` 테이블이 없고, 대신 `issue_embeddings`와 `daily_summaries`가 포함됩니다.
