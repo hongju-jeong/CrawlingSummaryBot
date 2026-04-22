@@ -198,8 +198,8 @@ def test_retrieve_digest_context_uses_embedding_similarity(monkeypatch):
         db.commit()
 
         monkeypatch.setattr(
-            "backend.app.services.reporting.openai_summary.OpenAISummaryService.embed_text",
-            lambda self, text: [1.0, 0.0],
+            "backend.app.services.reporting.daily_digest_retrieval.FAISS_AVAILABLE",
+            False,
         )
 
         docs, retrieval_method = retrieve_digest_context(
@@ -208,8 +208,84 @@ def test_retrieve_digest_context_uses_embedding_similarity(monkeypatch):
             topic="경제",
             keyword="sk하이닉스",
             prioritized_issue_ids={issue.id},
+            query_vector=[1.0, 0.0],
         )
         assert retrieval_method == "embedding"
+        assert docs
+        assert docs[0].issue_id == issue.id
+        assert docs[0].similarity_score > 1.0
+    finally:
+        db.close()
+
+
+def test_retrieve_digest_context_uses_faiss_when_available(monkeypatch):
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        source = Source(name="연합뉴스", source_type="crawler", base_url="https://www.yna.co.kr/")
+        db.add(source)
+        db.flush()
+
+        issue = Issue(
+            source_id=source.id,
+            press_name="연합뉴스",
+            external_id="digest-faiss-1",
+            title="하이닉스 투자 확대",
+            original_url="https://example.com/faiss-1",
+            category="경제",
+            raw_content="SK하이닉스의 대규모 투자 소식이다.",
+            unique_hash="digest-faiss-1",
+            published_at=datetime(2026, 4, 19, 8, 0, 0),
+            status="sent",
+        )
+        db.add(issue)
+        db.flush()
+
+        summary = IssueSummary(
+            issue_id=issue.id,
+            llm_provider="openai",
+            llm_model="gpt-5.4-mini",
+            prompt_version="v1",
+            summary_text="SK하이닉스 투자 확대 기사 요약",
+            importance="높음",
+            key_points_json=json.dumps(["투자 확대"], ensure_ascii=False),
+            research_value="반도체 투자 흐름에 중요하다.",
+            tracking_keywords_json=json.dumps(["SK하이닉스"], ensure_ascii=False),
+            summary_status="completed",
+        )
+        db.add(summary)
+        db.flush()
+
+        db.add(
+            IssueEmbedding(
+                issue_id=issue.id,
+                embedding_model="text-embedding-3-small",
+                content_hash="faiss-abc",
+                embedding_json=json.dumps([0.4, 0.6]),
+            )
+        )
+        db.commit()
+
+        monkeypatch.setattr(
+            "backend.app.services.reporting.daily_digest_retrieval.FAISS_AVAILABLE",
+            True,
+        )
+        monkeypatch.setattr(
+            "backend.app.services.reporting.daily_digest_retrieval._faiss_similarity_scores",
+            lambda query_vector, vectors: [0.9],
+        )
+
+        docs, retrieval_method = retrieve_digest_context(
+            db,
+            summary_date=date(2026, 4, 19),
+            topic="경제",
+            keyword="sk하이닉스",
+            prioritized_issue_ids={issue.id},
+            query_vector=[1.0, 0.0],
+        )
+        assert retrieval_method == "faiss"
         assert docs
         assert docs[0].issue_id == issue.id
         assert docs[0].similarity_score > 1.0

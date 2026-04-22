@@ -12,6 +12,16 @@ from ...config import settings
 from ...models import Issue, IssueEmbedding, IssueSummary
 from .openai_summary import OpenAISummaryService
 
+try:
+    import faiss  # type: ignore
+    import numpy as np
+
+    FAISS_AVAILABLE = True
+except Exception:
+    faiss = None
+    np = None
+    FAISS_AVAILABLE = False
+
 
 @dataclass(slots=True)
 class DigestContextDoc:
@@ -146,6 +156,8 @@ def retrieve_digest_context(
         retrieval_method = "embedding"
 
     docs: list[DigestContextDoc] = []
+    faiss_docs: list[DigestContextDoc] = []
+    faiss_vectors: list[list[float]] = []
     for issue, summary, embedding in rows:
         key_points = _parse_json_list(summary.key_points_json)
         tracking_keywords = _parse_json_list(summary.tracking_keywords_json)
@@ -153,27 +165,40 @@ def retrieve_digest_context(
         priority_boost = 0.45 if prioritized_issue_ids and issue.id in prioritized_issue_ids else 0.0
         importance_boost = {"낮음": 0.0, "보통": 0.05, "높음": 0.15, "긴급": 0.25}.get(summary.importance or "보통", 0.0)
         recency_boost = 0.1 if issue.published_at and issue.published_at.date() == summary_date else 0.0
-        similarity_score = keyword_hit_score + priority_boost + importance_boost + recency_boost
-        if query_vector is not None and embedding is not None:
-            similarity_score += max(_cosine_similarity(query_vector, _parse_vector(embedding.embedding_json)), 0.0)
-        docs.append(
-            DigestContextDoc(
-                issue_id=issue.id,
-                title=issue.title,
-                summary=summary.summary_text,
-                key_points=key_points,
-                importance=summary.importance or "보통",
-                source_name=issue.press_name or "출처 미상",
-                original_url=issue.original_url,
-                published_at=issue.published_at or issue.created_at,
-                similarity_score=similarity_score,
-                metadata={
-                    "tracking_keywords": tracking_keywords,
-                    "research_value": summary.research_value,
-                },
-            )
+        doc = DigestContextDoc(
+            issue_id=issue.id,
+            title=issue.title,
+            summary=summary.summary_text,
+            key_points=key_points,
+            importance=summary.importance or "보통",
+            source_name=issue.press_name or "출처 미상",
+            original_url=issue.original_url,
+            published_at=issue.published_at or issue.created_at,
+            similarity_score=keyword_hit_score + priority_boost + importance_boost + recency_boost,
+            metadata={
+                "tracking_keywords": tracking_keywords,
+                "research_value": summary.research_value,
+            },
         )
+        docs.append(doc)
+        if query_vector is not None and embedding is not None:
+            vector = _parse_vector(embedding.embedding_json)
+            if vector:
+                if FAISS_AVAILABLE:
+                    faiss_docs.append(doc)
+                    faiss_vectors.append(vector)
+                else:
+                    doc.similarity_score += max(_cosine_similarity(query_vector, vector), 0.0)
 
+    if query_vector is not None and faiss_docs and FAISS_AVAILABLE:
+        try:
+            similarity_scores = _faiss_similarity_scores(query_vector, faiss_vectors)
+            for doc, score in zip(faiss_docs, similarity_scores, strict=True):
+                doc.similarity_score += max(score, 0.0)
+            retrieval_method = "faiss"
+        except Exception:
+            for doc, vector in zip(faiss_docs, faiss_vectors, strict=True):
+                doc.similarity_score += max(_cosine_similarity(query_vector, vector), 0.0)
     ranked = sorted(docs, key=lambda item: (item.similarity_score, item.published_at), reverse=True)
     return ranked[: settings.daily_summary_rag_top_k], retrieval_method
 
@@ -222,3 +247,27 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return sum(l * r for l, r in zip(left, right, strict=True)) / (left_norm * right_norm)
+
+
+def _faiss_similarity_scores(query_vector: list[float], vectors: list[list[float]]) -> list[float]:
+    if not FAISS_AVAILABLE or not vectors:
+        raise RuntimeError("FAISS is not available.")
+    if not query_vector or any(len(vector) != len(query_vector) for vector in vectors):
+        raise ValueError("All vectors must match the query vector dimension.")
+
+    matrix = np.array(vectors, dtype="float32")
+    query = np.array([query_vector], dtype="float32")
+
+    faiss.normalize_L2(matrix)
+    faiss.normalize_L2(query)
+
+    index = faiss.IndexFlatIP(matrix.shape[1])
+    index.add(matrix)
+    scores, indices = index.search(query, len(vectors))
+
+    result = [0.0] * len(vectors)
+    for rank, row_index in enumerate(indices[0]):
+        if row_index < 0:
+            continue
+        result[int(row_index)] = float(scores[0][rank])
+    return result

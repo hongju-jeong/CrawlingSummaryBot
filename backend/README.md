@@ -164,6 +164,7 @@ APP_X_ACCOUNTS=[]
 - 저장 시점의 rule-based 분류는 임시값입니다. 최종 주제는 OpenAI가 `topic + summary`를 함께 생성하는 후처리 단계에서 확정됩니다.
 - `APP_OPENAI_API_KEY`가 설정되면 `issue_summaries`에 실제 `gpt-5.4-mini` 결과를 저장합니다. 이때 요약, 최종 주제, 중요도, 핵심 포인트, 리서치 포인트, 추적 키워드를 한 번의 OpenAI 호출로 처리합니다.
 - `APP_OPENAI_EMBEDDING_MODEL`이 설정되면 기사 분석 결과를 바탕으로 `issue_embeddings`를 생성해 daily digest용 semantic retrieval에 사용합니다.
+- `faiss-cpu`와 `numpy`가 설치되어 있으면 daily digest retrieval은 query-time FAISS 인덱스를 우선 사용하고, 미설치 시 기존 cosine similarity fallback을 사용합니다.
 - `APP_SLACK_WEBHOOK_URL`이 설정되고 `APP_SLACK_AUTO_SEND=true`이면, 새로 수집된 기사에 대해 중요도에 따라 기본 카드 또는 리서치 카드 형식으로 Slack으로 자동 전송합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`를 설정하면, 주제별로 다른 Slack 채널과 webhook으로 라우팅합니다.
 - `APP_TOPIC_WEBHOOKS`와 `APP_TOPIC_CHANNELS`는 JSON 한 줄 형식과 여러 줄 딕셔너리 형식을 모두 허용합니다.
